@@ -2,8 +2,19 @@ from typing import Any, Optional
 
 import json
 from pydantic import BaseModel
+from typing import Literal
+from enum import Enum
+
+class ToolChoice(str, Enum):
+    """Tool choice options"""
+
+    NONE = "none"
+    AUTO = "auto"
+    REQUIRED = "required"
 
 
+TOOL_CHOICE_VALUES = tuple(choice.value for choice in ToolChoice)
+TOOL_CHOICE_TYPE = Literal[TOOL_CHOICE_VALUES]  # type: ignore
 
 class Function(BaseModel):
     name: str
