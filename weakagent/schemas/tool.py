@@ -1,9 +1,27 @@
-from typing import Any, Optional
+'''
+你的 ToolCall / Function 本质是：
+
+LLM protocol（协议层）
+
+它不仅 tool 用：
+
+还会被：
+
+memory
+logger
+agent state
+streaming parser
+OpenAI adapter
+
+使用, 所以写在schemas里面，而不是tools里面
+'''
+from typing import Optional
 
 import json
-from pydantic import BaseModel
-from typing import Literal
 from enum import Enum
+from typing import Literal
+
+from pydantic import BaseModel
 
 class ToolChoice(str, Enum):
     """Tool choice options"""
@@ -31,11 +49,3 @@ class ToolCall(BaseModel):
     id: str
     type: str = "function"
     function: Function
-
-
-class ToolResult(BaseModel):
-    tool_call_id: str
-    name: str
-    result: Any
-    success: bool = True
-    error: Optional[str] = None
