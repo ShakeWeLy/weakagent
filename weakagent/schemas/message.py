@@ -1,8 +1,8 @@
 from enum import Enum
 from typing import Any, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
-from schemas.tool import ToolCall
-from utils.logger import get_logger
+from weakagent.schemas.tool import ToolCall
+from weakagent.utils.logger import get_logger
 
 class Role(str, Enum):
     """Message role options"""

@@ -1,8 +1,8 @@
 from typing import List
 from pydantic import BaseModel, Field
-from schemas.message import Message
-from schemas.tool import ToolCall
-from utils.logger import get_logger
+from weakagent.schemas.message import Message
+from weakagent.schemas.tool import ToolCall
+from weakagent.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

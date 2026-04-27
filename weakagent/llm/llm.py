@@ -3,7 +3,7 @@ LLM 客户端：仅使用 OpenAI Python SDK（``AsyncOpenAI``），
 
 支持官方 API 与任意 OpenAI 兼容的 ``base_url``。显式构造 ``LLM(...)``；
 
-或经 :class:`llm.factory.LLMFactory` 创建；不做进程内单例。
+或经 :class:`weakagent.llm.factory.LLMFactory` 创建；不做进程内单例。
 """
 from typing import List, Optional, Union
 
@@ -23,15 +23,15 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from config.settings import LLMSettings, config
+from weakagent.config.settings import LLMSettings, config
 from .token_counter import TokenCounter
-from utils.exceptions import ModelCapabilityError, TokenLimitExceeded
-from utils.logger import get_logger  # Assuming a logger is set up in your app
-from schemas.message import (
+from weakagent.utils.exceptions import ModelCapabilityError, TokenLimitExceeded
+from weakagent.utils.logger import get_logger  # Assuming a logger is set up in your app
+from weakagent.schemas.message import (
     ROLE_VALUES,
     Message,
 )
-from schemas.tool import (
+from weakagent.schemas.tool import (
     ToolChoice,
     TOOL_CHOICE_TYPE,
     TOOL_CHOICE_VALUES,
@@ -303,7 +303,7 @@ class LLM:
             # estimate completion tokens for streaming response
             completion_tokens = self.count_tokens(completion_text)
             logger.info(
-                f"Estimated completion tokens for streaming response: {completion_tokens}"
+                f"[LLM] {self.model} estimated completion tokens for streaming response: {completion_tokens}"
             )
             self.total_completion_tokens += completion_tokens
 

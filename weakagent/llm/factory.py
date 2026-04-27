@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from config.settings import LLMSettings
+from weakagent.config.settings import LLMSettings
 
 if TYPE_CHECKING:
     from .llm import LLM
