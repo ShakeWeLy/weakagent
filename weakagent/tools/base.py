@@ -48,6 +48,8 @@ class ToolExecutionResult(BaseModel):
     #         base64_image=base64_image
     #     )
 
+class CLIExecutionResult(ToolExecutionResult):
+    """Result of running a CLI tool (execution layer)."""
 
 
 # =========================================================
@@ -60,7 +62,8 @@ class BaseTool(ABC):
 
     name: str = ""
     description: str = ""
-    args_model: Type[BaseModel] = BaseModel
+    args_model: Optional[Type[BaseModel]] = None
+    parameters: dict = Field(default_factory=dict, description="Parameters for the tool")
 
     # optional metadata
     timeout: int = 30
@@ -72,28 +75,30 @@ class BaseTool(ABC):
         Validate args and execute tool
         """
         try:
-            args = self.args_model(**kwargs)
-            return await self.execute(args)
+            if self.args_model is not None:
+                validated_args = self.args_model(**kwargs)
+                return await self.execute(validated_args)
+            return await self.execute(**kwargs)
         except Exception as e:
             return self.fail_response(str(e))
 
     @abstractmethod
-    async def execute(self, args: BaseModel) -> ToolExecutionResult:
+    async def execute(self, *args, **kwargs) -> ToolExecutionResult:
         """
         Subclass must implement
         """
         raise NotImplementedError
 
-    def to_tool_schema(self) -> dict:
+    def to_params(self) -> dict:
         """
-        OpenAI tool calling schema
+        OpenAI tool calling parameters
         """
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.args_model.model_json_schema(),
+                "parameters": self.parameters,
             },
         }
 
@@ -118,35 +123,6 @@ class BaseTool(ABC):
         Build failed result
         """
         return ToolExecutionResult.fail(error=msg)
-
-
-# =========================================================
-# Example Tool
-# =========================================================
-class SearchArgs(BaseModel):
-    query: str = Field(..., description="Search query")
-    top_k: int = Field(default=5, ge=1, le=10)
-
-
-class SearchTool(BaseTool):
-    name = "search"
-    description = "Search information from internet"
-    args_model = SearchArgs
-
-    async def execute(self, args: SearchArgs) -> ToolExecutionResult:
-        try:
-            result = {
-                "query": args.query,
-                "top_k": args.top_k,
-                "items": [
-                    f"Result 1 for {args.query}",
-                    f"Result 2 for {args.query}",
-                ],
-            }
-            return self.success_response(result)
-
-        except Exception as e:
-            return self.fail_response(str(e))
 
 
 # =========================================================
