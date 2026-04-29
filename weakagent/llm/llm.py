@@ -27,6 +27,7 @@ from weakagent.config.settings import LLMSettings, config
 from .token_counter import TokenCounter
 from weakagent.utils.exceptions import ModelCapabilityError, TokenLimitExceeded
 from weakagent.utils.logger import get_logger  # Assuming a logger is set up in your app
+from weakagent.utils.verbose import get_real_caller
 from weakagent.schemas.message import (
     ROLE_VALUES,
     Message,
@@ -38,6 +39,7 @@ from weakagent.schemas.tool import (
 )
 
 logger = get_logger(__name__)
+
 
 
 class LLM:
@@ -212,6 +214,7 @@ class LLM:
         system_msgs: Optional[List[Union[dict, Message]]] = None,
         stream: bool = True,
         temperature: Optional[float] = None,
+        verbose: bool = False,
     ) -> str:
         """
         Send a prompt to the LLM and get the response.
@@ -221,7 +224,7 @@ class LLM:
             system_msgs: Optional system messages to prepend
             stream (bool): Whether to stream the response
             temperature (float): Sampling temperature for the response
-
+            verbose (bool): Whether to print the messages.
         Returns:
             str: The generated response
 
@@ -284,7 +287,10 @@ class LLM:
 
             # Streaming request, For streaming, update estimated token count before making the request
             self.update_token_count(input_tokens)
-
+            
+            if verbose:
+                print(f"[VERBOSE] caller={get_real_caller()} model={self.model} messages={messages}")
+            
             response = await self.client.chat.completions.create(**params, stream=True)
 
             collected_messages = []
@@ -500,6 +506,7 @@ class LLM:
         tools: Optional[List[dict]] = None,
         tool_choice: TOOL_CHOICE_TYPE = ToolChoice.AUTO,  # type: ignore
         temperature: Optional[float] = None,
+        verbose: bool = False,
         **kwargs,
     ) -> ChatCompletionMessage | None:
         """
@@ -513,7 +520,7 @@ class LLM:
             tool_choice: Tool choice strategy
             temperature: Sampling temperature for the response
             **kwargs: Additional completion arguments
-
+            verbose (bool): Whether to print the messages.
         Returns:
             ChatCompletionMessage: The model's response
 
@@ -537,7 +544,10 @@ class LLM:
                 messages = system_msgs + self.format_messages(messages, supports_images)
             else:
                 messages = self.format_messages(messages, supports_images)
-
+            
+            if verbose:
+                print(f"[VERBOSE] caller={get_real_caller()} model={self.model} messages={messages}")
+            
             # Calculate input token count
             input_tokens = self.count_message_tokens(messages)
 

@@ -36,7 +36,7 @@ class ToolCallAgent(ReActAgent):
     _current_base64_image: Optional[str] = None
 
     max_steps: int = 30
-    max_observe: Optional[Union[int, bool]] = None
+    max_observe: Optional[Union[int, bool]] = None # max observe in tool execute result.
 
     async def think(self) -> bool:
         """Process current state and decide next actions using tools"""
