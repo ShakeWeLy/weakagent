@@ -1,4 +1,4 @@
-"""weakagent: LLM 与 agent 相关组件。"""
+"""WeakAgent: A framework for building agents using LLMs."""
 
 __version__ = "0.1.0"
 
