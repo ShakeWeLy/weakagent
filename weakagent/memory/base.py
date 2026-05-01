@@ -1,14 +1,21 @@
+from abc import ABC, abstractmethod
+from enum import Enum
 from typing import List
 from pydantic import BaseModel, Field
 from weakagent.schemas.message import Message
 from weakagent.schemas.tool import ToolCall
 from weakagent.utils.logger import get_logger
-from weakagent.memory.base import BaseMemory, MemoryType
 
 logger = get_logger(__name__)
 
+class MemoryType(str, Enum):
+    SHORT = "short"
+    LONG = "long"
+    WORKING = "working"
 
-class ShortMemory(BaseMemory):
+
+
+class BaseMemory(BaseModel, ABC):
     messages: List[Message] = Field(default_factory=list)
     max_messages: int = Field(default=100)
     memory_type: MemoryType = Field(default=MemoryType.SHORT)
