@@ -131,14 +131,18 @@ class ObjDetectionTool(BaseTool):
     name: str = "obj_detection"
     description: str = "Detect objects in an image"
     parameters: dict = {
-        "image": {
-            "type": "string",
-            "description": "The image to detect objects in",
+        "type": "object",
+        "properties": {
+            "image_path": {
+                "type": "string",
+                "description": "The image to detect objects in",
+            },
+            "prompt": {
+                "type": "string",
+                "description": "The prompt to use for the object detection",
+            },
         },
-        "prompt": {
-            "type": "string",
-            "description": "The prompt to use for the object detection",
-        },
+        "required": ["image_path", "prompt"],
     }
 
     async def execute(self, image_path: str, prompt: str) -> ToolExecutionResult:
