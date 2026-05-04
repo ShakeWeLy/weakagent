@@ -171,12 +171,22 @@ class LLM:
                             for item in message["content"]
                         ]
 
-                    # Add the image to content
+                    # Add the image to content (pass through if already a data URL)
+                    _img = message["base64_image"]
+                    if (
+                        isinstance(_img, str)
+                        and _img.startswith("data:")
+                        and "base64," in _img
+                    ):
+                        _image_url = _img
+                    else:
+                        _image_url = f"data:image/jpeg;base64,{_img}"
+
                     message["content"].append(
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/jpeg;base64,{message['base64_image']}"
+                                "url": _image_url,
                             },
                         }
                     )

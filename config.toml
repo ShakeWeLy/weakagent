@@ -1,11 +1,11 @@
 # Global LLM configuration
 [llm]
-model = "qwen-plus"       # The LLM model to use
+model = "kimi-k2.5"       # The LLM model to use
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1" # API endpoint URL
 api_key = "sk-4f519a5d8cba44c48ad3655926cfc753"                   # Your API key
 max_tokens = 8192                          # Maximum number of tokens in the response
 temperature = 0.0                          # Controls randomness
-supports_images = false
+supports_images = true
 use_max_completion_tokens = false
 
 # [llm] #OLLAMA:
