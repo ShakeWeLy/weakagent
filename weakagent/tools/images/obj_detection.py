@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -129,29 +129,32 @@ def draw_bbox_2d_normalized(
 
 class ObjDetectionTool(BaseTool):
     name: str = "obj_detection"
-    description: str = "Detect objects in an image"
+    description: str = "Use when you need to detect objects in an image and return the position of the objects"
     parameters: dict = {
         "type": "object",
         "properties": {
             "image_path": {
                 "type": "string",
-                "description": "The image to detect objects in",
+                "description": "The path to the image to detect objects in",
             },
             "prompt": {
                 "type": "string",
-                "description": "The prompt to use for the object detection",
+                "description": "The prompt to use for the object detection, such as 'get the xxx object's position in the image'",
             },
         },
         "required": ["image_path", "prompt"],
     }
 
-    async def execute(self, image_path: str, prompt: str) -> ToolExecutionResult:
+    async def execute(self, image_path: str, prompt: Optional[str] = None) -> ToolExecutionResult:
         if not config.llm["default"].supports_images:
             return self.fail_response("Model does not support images")
 
         path = Path(image_path)
         if not path.is_file():
             return self.fail_response(f"Image not found: {image_path}")
+        
+        if prompt is None:
+            return self.fail_response("Prompt is required")
 
         llm = LLM(config_name="default")
         pil_img = Image.open(image_path).convert("RGB")

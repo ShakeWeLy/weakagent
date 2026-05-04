@@ -6,9 +6,11 @@ from weakagent.schemas.message import Message
 
 from weakagent.tools.base import BaseTool, ToolExecutionResult
 from weakagent.utils.image import image_to_base64
+
+
 class ReadImagesTool(BaseTool):
     name: str = "read_images"
-    description: str = "Read images from a directory"
+    description: str = "Use when you need to read an image and return the content of the image, especially when you need to analyze the image"
     parameters: dict = {
         "type": "object",
         "properties": {
@@ -18,7 +20,7 @@ class ReadImagesTool(BaseTool):
             },
             "prompt": {
                 "type": "string",
-                "description": "The prompt to use for analyzing the image, such as 'identify the objects in the image'"
+                "description": "The prompt to use for analyzing the image, such as 'describe the image'"
             },
         },
         "required": ["image_path"],
@@ -30,7 +32,7 @@ class ReadImagesTool(BaseTool):
         if not os.path.exists(image_path):
             return self.fail_response(f"Image not found: {image_path}")
         if prompt is None:
-            prompt = "Read the image and describe the image"
+            prompt = "describe the image"
         llm = LLM(config_name="default")
         image_url = image_to_base64(image_path)
         messages = [
