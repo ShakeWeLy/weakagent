@@ -41,4 +41,4 @@ class ReadImagesTool(BaseTool):
             ),
         ]
         answer = await llm.ask(messages=messages)
-        return ToolExecutionResult(success=True, message="Images read successfully")
+        return ToolExecutionResult(success=True, message="Images read successfully", data={"answer": answer})
