@@ -311,11 +311,13 @@ class LLM:
                 collected_messages.append(chunk_message)
                 completion_text += chunk_message
                 print(chunk_message, end="", flush=True)
-
+            if not completion_text:
+                print("No print content from LLM")
             print()  # Newline after streaming
             print("-"*20)
             full_response = "".join(collected_messages).strip()
             if not full_response:
+                print("No print content from LLM")
                 raise ValueError("Empty response from streaming LLM")
 
             # estimate completion tokens for streaming response
@@ -475,7 +477,8 @@ class LLM:
                 chunk_message = chunk.choices[0].delta.content or ""
                 collected_messages.append(chunk_message)
                 print(chunk_message, end="", flush=True)
-
+            if not collected_messages:
+                print("No print content from LLM")
             print()  # Newline after streaming
             print("-"*20)
             full_response = "".join(collected_messages).strip()
@@ -609,12 +612,13 @@ class LLM:
             )
 
             # Check if response is valid
-            print("-"*20)
             if not response.choices or not response.choices[0].message:
+                print("-"*20)
+                print("No print content from LLM")
                 print(response)
+                print("-"*20)
                 # raise ValueError("Invalid or empty response from LLM")
                 return None
-            print("-"*20)
             # Update token counts
             self.update_token_count(
                 response.usage.prompt_tokens, response.usage.completion_tokens
