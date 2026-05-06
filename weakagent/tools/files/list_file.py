@@ -46,14 +46,16 @@ class ListFilesTool(BaseTool):
         "required": [],
     }
 
-    async def execute(self, directory_path: str,
+    async def execute(
+                            self,
+                            directory_path: str = ".",
                             recursive: bool = False,
                             show_details: bool = True,
                             file_extensions: Optional[List[str]] = None,
                             include_directories: bool = True,
                             max_results: int = 500) -> ToolExecutionResult:
         if not directory_path:
-            return self.fail_response("Directory path is required")
+            directory_path = "."
         
         try:
             # 转换为 Path 对象
@@ -61,14 +63,14 @@ class ListFilesTool(BaseTool):
             
             # 检查路径是否存在
             if not path.exists():
-                return f"路径不存在: {directory_path}"
+                return self.fail_response(f"路径不存在: {directory_path}")
             
             # 如果不是目录，返回文件信息
             if path.is_file():
-                return self._format_file_info(path, show_details)
+                return self.success_response(self._format_file_info(path, show_details))
             
             if not path.is_dir():
-                return f"路径不是目录: {directory_path}"
+                return self.fail_response(f"路径不是目录: {directory_path}")
             
             # 获取文件列表
             items = []
@@ -78,7 +80,7 @@ class ListFilesTool(BaseTool):
                 items = self._get_items_in_directory(path, file_extensions, include_directories, max_results)
             
             if not items:
-                return f"目录 '{directory_path}' 为空或没有匹配的文件"
+                return self.success_response(f"目录 '{directory_path}' 为空或没有匹配的文件")
             
             # 格式化输出
             output_lines = [f"目录: {path.absolute()}\n"]
@@ -101,10 +103,10 @@ class ListFilesTool(BaseTool):
             if len(items) >= max_results:
                 output_lines.append(f"\n(仅显示前 {max_results} 个项目)")
             
-            return "\n".join(output_lines)
+            return self.success_response("\n".join(output_lines))
             
         except Exception as e:
-            return f"列出文件时出错: {str(e)}"
+            return self.fail_response(f"列出文件时出错: {str(e)}")
     
     def _format_file_info(self, file_path: Path, show_details: bool) -> str:
         """格式化单个文件信息"""

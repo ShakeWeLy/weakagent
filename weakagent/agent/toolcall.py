@@ -193,9 +193,9 @@ class ToolCallAgent(ReActAgent):
 
             # Format result for display (standard case)
             observation = (
-                f"Observed output of cmd `{name}` executed:\n{str(result)}"
-                if result
-                else f"Cmd `{name}` completed with no output"
+                f"Observed output of cmd `{name}` executed:\n{result.output}"
+                if result.success and result.output
+                else f"Cmd `{name}` completed with no output: {result.error}"
             )
 
             return observation

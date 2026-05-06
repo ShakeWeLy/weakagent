@@ -100,7 +100,7 @@ class GrepTool(BaseTool):
             if len(results) > max_results:
                 output_lines.append(f"\n(Only displaying the first {max_results} results, found {len(results)} in total)")
             
-            return "\n".join(output_lines)
+            return self.success_response("\n".join(output_lines))
             
         except Exception as e:
             return self.fail_response(f"Error searching: {str(e)}")
