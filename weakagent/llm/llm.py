@@ -299,11 +299,12 @@ class LLM:
             self.update_token_count(input_tokens)
             
             if verbose:
-                print(f"[VERBOSE] caller={get_real_caller()} model={self.model} messages={messages}")
+                logger.info(f"[VERBOSE] caller={get_real_caller()} model={self.model} messages={messages}")
             
             response = await self.client.chat.completions.create(**params, stream=True)
 
             collected_messages = []
+            print("-"*20)
             completion_text = ""
             async for chunk in response:
                 chunk_message = chunk.choices[0].delta.content or ""
@@ -312,6 +313,7 @@ class LLM:
                 print(chunk_message, end="", flush=True)
 
             print()  # Newline after streaming
+            print("-"*20)
             full_response = "".join(collected_messages).strip()
             if not full_response:
                 raise ValueError("Empty response from streaming LLM")
@@ -467,6 +469,7 @@ class LLM:
             self.update_token_count(input_tokens)
             response = await self.client.chat.completions.create(**params)
 
+            print("-"*20)
             collected_messages = []
             async for chunk in response:
                 chunk_message = chunk.choices[0].delta.content or ""
@@ -474,6 +477,7 @@ class LLM:
                 print(chunk_message, end="", flush=True)
 
             print()  # Newline after streaming
+            print("-"*20)
             full_response = "".join(collected_messages).strip()
 
             if not full_response:
@@ -556,7 +560,7 @@ class LLM:
                 messages = self.format_messages(messages, supports_images)
             
             if verbose:
-                print(f"[VERBOSE] caller={get_real_caller()} model={self.model} messages={messages}")
+                logger.info(f"[VERBOSE] caller={get_real_caller()} model={self.model} messages={messages}")
             
             # Calculate input token count
             input_tokens = self.count_message_tokens(messages)
@@ -605,11 +609,12 @@ class LLM:
             )
 
             # Check if response is valid
+            print("-"*20)
             if not response.choices or not response.choices[0].message:
                 print(response)
                 # raise ValueError("Invalid or empty response from LLM")
                 return None
-
+            print("-"*20)
             # Update token counts
             self.update_token_count(
                 response.usage.prompt_tokens, response.usage.completion_tokens

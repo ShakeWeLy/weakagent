@@ -12,7 +12,7 @@ class _ColorFormatter(logging.Formatter):
     """
 
     _LEVEL_WIDTH = 6
-    _NAME_WIDTH = 30
+    _NAME_WIDTH = 25
 
     _RESET = "\x1b[0m"
     _DIM = "\x1b[2m"
