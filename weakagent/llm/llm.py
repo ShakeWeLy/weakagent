@@ -147,6 +147,9 @@ class LLM:
                 message = message.to_dict()
 
             if isinstance(message, dict):
+                # Avoid mutating caller-owned dicts.
+                message = dict(message)
+
                 # If message is a dict, ensure it has required fields
                 if "role" not in message:
                     raise ValueError("Message dict must contain 'role' field")
@@ -196,11 +199,25 @@ class LLM:
                 # If model doesn't support images but message has base64_image, handle gracefully
                 elif not supports_images and message.get("base64_image"):
                     # Just remove the base64_image field and keep the text content
+                    if not message.get("content"):
+                        logger.warning(
+                            "format_messages: dropping image-only message (model doesn't support images). "
+                            "role=%s keys=%s",
+                            message.get("role"),
+                            list(message.keys()),
+                        )
                     del message["base64_image"]
 
                 if "content" in message or "tool_calls" in message:
                     formatted_messages.append(message)
-                # else: do not include the message
+                else:
+                    # This is a common source of "why did the message disappear?"
+                    logger.warning(
+                        "format_messages: skipping message because neither 'content' nor 'tool_calls' present. "
+                        "role=%s keys=%s",
+                        message.get("role"),
+                        list(message.keys()),
+                    )
             else:
                 raise TypeError(f"Unsupported message type: {type(message)}")
 
