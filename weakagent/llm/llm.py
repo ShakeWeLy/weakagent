@@ -5,7 +5,11 @@ LLM 客户端：仅使用 OpenAI Python SDK（``AsyncOpenAI``），
 
 或经 :class:`weakagent.llm.factory.LLMFactory` 创建；不做进程内单例。
 """
-from typing import List, Optional, Union
+import asyncio
+import inspect
+import json
+import uuid
+from typing import Any, Awaitable, Callable, List, Optional, Union
 
 import tiktoken
 from openai import (
@@ -39,6 +43,8 @@ from weakagent.schemas.tool import (
 )
 
 logger = get_logger(__name__)
+
+StreamChunkCallback = Callable[[str], Union[Any, Awaitable[Any]]]
 
 
 
@@ -246,6 +252,7 @@ class LLM:
         stream: bool = True,
         temperature: Optional[float] = None,
         verbose: bool = False,
+        on_stream_chunk: Optional[StreamChunkCallback] = None,
     ) -> str:
         """
         Send a prompt to the LLM and get the response.
@@ -256,6 +263,8 @@ class LLM:
             stream (bool): Whether to stream the response
             temperature (float): Sampling temperature for the response
             verbose (bool): Whether to print the messages.
+            on_stream_chunk: Optional callback invoked for each streamed text chunk.
+                Supports both sync and async callables; callback failures are isolated.
         Returns:
             str: The generated response
 
@@ -327,6 +336,20 @@ class LLM:
             collected_messages = []
             print("-"*20)
             completion_text = ""
+
+            def _on_callback_done(task: asyncio.Task) -> None:
+                try:
+                    exc = task.exception()
+                except asyncio.CancelledError:
+                    return
+                except Exception:
+                    logger.exception("Unexpected error while checking stream callback task")
+                    return
+                if exc is not None:
+                    logger.exception(
+                        "on_stream_chunk async callback failed", exc_info=exc
+                    )
+
             async for chunk in response:
                 # Some OpenAI-compatible providers may yield chunks with empty `choices`
                 # (or with no `delta.content`). Guard to avoid `IndexError`.
@@ -343,10 +366,20 @@ class LLM:
                 collected_messages.append(chunk_message)
                 completion_text += chunk_message
                 print(chunk_message, end="", flush=True)
+                if on_stream_chunk is not None:
+                    try:
+                        callback_result = on_stream_chunk(chunk_message)
+                        if inspect.isawaitable(callback_result):
+                            task = asyncio.create_task(callback_result)
+                            task.add_done_callback(_on_callback_done)
+                    except Exception:
+                        # Streaming side effects (e.g. TTS/front-end push) must not break LLM call
+                        logger.exception("on_stream_chunk callback failed")
             if not completion_text:
                 print("No print content from LLM")
             print()  # Newline after streaming
             print("-"*20)
+
             full_response = "".join(collected_messages).strip()
             if not full_response:
                 print("No print content from LLM")
@@ -394,6 +427,7 @@ class LLM:
         system_msgs: Optional[List[Union[dict, Message]]] = None,
         stream: bool = False,
         temperature: Optional[float] = None,
+        on_stream_chunk: Optional[StreamChunkCallback] = None,
     ) -> str:
         """
         Send a prompt with images to the LLM and get the response.
@@ -404,6 +438,8 @@ class LLM:
             system_msgs: Optional system messages to prepend
             stream (bool): Whether to stream the response
             temperature (float): Sampling temperature for the response
+            on_stream_chunk: Optional callback invoked for each streamed text chunk.
+                Supports both sync and async callables; callback failures are isolated.
 
         Returns:
             str: The generated response
@@ -505,6 +541,20 @@ class LLM:
 
             print("-"*20)
             collected_messages = []
+
+            def _on_callback_done(task: asyncio.Task) -> None:
+                try:
+                    exc = task.exception()
+                except asyncio.CancelledError:
+                    return
+                except Exception:
+                    logger.exception("Unexpected error while checking stream callback task")
+                    return
+                if exc is not None:
+                    logger.exception(
+                        "on_stream_chunk async callback failed", exc_info=exc
+                    )
+
             async for chunk in response:
                 # Some OpenAI-compatible providers may yield chunks with empty `choices`
                 # (or with no `delta.content`). Guard to avoid `IndexError`.
@@ -520,6 +570,15 @@ class LLM:
 
                 collected_messages.append(chunk_message)
                 print(chunk_message, end="", flush=True)
+                if on_stream_chunk is not None:
+                    try:
+                        callback_result = on_stream_chunk(chunk_message)
+                        if inspect.isawaitable(callback_result):
+                            task = asyncio.create_task(callback_result)
+                            task.add_done_callback(_on_callback_done)
+                    except Exception:
+                        # Streaming side effects (e.g. TTS/front-end push) must not break LLM call
+                        logger.exception("on_stream_chunk callback failed")
             if not collected_messages:
                 print("No print content from LLM")
             print()  # Newline after streaming
@@ -686,6 +745,257 @@ class LLM:
             raise
         except Exception as e:
             logger.error(f"Unexpected error in ask_tool: {e}")
+            raise
+
+    @retry(
+        wait=wait_random_exponential(min=1, max=60),
+        stop=stop_after_attempt(6),
+        retry=retry_if_exception_type(
+            (OpenAIError, Exception, ValueError)
+        ),  # Don't retry TokenLimitExceeded
+    )
+    async def ask_tool_stream(
+        self,
+        messages: List[Union[dict, Message]],
+        system_msgs: Optional[List[Union[dict, Message]]] = None,
+        timeout: int = 300,
+        tools: Optional[List[dict]] = None,
+        tool_choice: TOOL_CHOICE_TYPE = ToolChoice.AUTO,  # type: ignore
+        temperature: Optional[float] = None,
+        verbose: bool = False,
+        on_stream_chunk: Optional[StreamChunkCallback] = None,
+        **kwargs,
+    ) -> tuple[str, List[dict]]:
+        """
+        Ask LLM using tools with streaming and collect tool calls.
+
+        Args:
+            messages: List of conversation messages
+            system_msgs: Optional system messages to prepend
+            timeout: Request timeout in seconds
+            tools: List of tools to use
+            tool_choice: Tool choice strategy
+            temperature: Sampling temperature for the response
+            verbose (bool): Whether to print the messages.
+            on_stream_chunk: Optional callback invoked for each streamed text chunk.
+                Supports both sync and async callables; callback failures are isolated.
+            **kwargs: Additional completion arguments
+
+        Returns:
+            tuple[str, List[dict]]: (assistant text, collected tool calls)
+
+        Raises:
+            TokenLimitExceeded: If token limits are exceeded
+            ValueError: If tools, tool_choice, or streamed response is invalid/empty
+            OpenAIError: If API call fails after retries
+            Exception: For unexpected errors
+        """
+        try:
+            if tool_choice not in TOOL_CHOICE_VALUES:
+                raise ValueError(f"Invalid tool_choice: {tool_choice}")
+
+            supports_images = self.supports_images
+            if system_msgs:
+                system_msgs = self.format_messages(system_msgs, supports_images)
+                messages = system_msgs + self.format_messages(messages, supports_images)
+            else:
+                messages = self.format_messages(messages, supports_images)
+
+            if verbose:
+                logger.info(
+                    f"[VERBOSE] caller={get_real_caller()} model={self.model} messages={messages}"
+                )
+
+            input_tokens = self.count_message_tokens(messages)
+
+            tools_tokens = 0
+            if tools:
+                for tool in tools:
+                    tools_tokens += self.count_tokens(str(tool))
+            input_tokens += tools_tokens
+
+            if not self.check_token_limit(input_tokens):
+                error_message = self.get_limit_error_message(input_tokens)
+                raise TokenLimitExceeded(error_message)
+
+            if tools:
+                for tool in tools:
+                    if not isinstance(tool, dict) or "type" not in tool:
+                        raise ValueError("Each tool must be a dict with 'type' field")
+
+            params = {
+                "model": self.model,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": tool_choice,
+                "timeout": timeout,
+                "stream": True,
+                **kwargs,
+            }
+
+            if self.use_max_completion_tokens:
+                params["max_completion_tokens"] = self.max_tokens
+            else:
+                params["max_tokens"] = self.max_tokens
+                params["temperature"] = (
+                    temperature if temperature is not None else self.temperature
+                )
+
+            self.update_token_count(input_tokens)
+            response = await self.client.chat.completions.create(**params)
+
+            print("-" * 20)
+            collected_messages: List[str] = []
+            tool_calls_buffer: dict[int, dict] = {}
+
+            def _on_callback_done(task: asyncio.Task) -> None:
+                try:
+                    exc = task.exception()
+                except asyncio.CancelledError:
+                    return
+                except Exception:
+                    logger.exception(
+                        "Unexpected error while checking stream callback task"
+                    )
+                    return
+                if exc is not None:
+                    logger.exception(
+                        "on_stream_chunk async callback failed", exc_info=exc
+                    )
+
+            async for chunk in response:
+                if not getattr(chunk, "choices", None):
+                    continue
+
+                choice0 = chunk.choices[0]
+                delta = getattr(choice0, "delta", None)
+                if delta is None:
+                    continue
+
+                chunk_message = getattr(delta, "content", None) or ""
+                if chunk_message:
+                    collected_messages.append(chunk_message)
+                    print(chunk_message, end="", flush=True)
+                    if on_stream_chunk is not None:
+                        try:
+                            callback_result = on_stream_chunk(chunk_message)
+                            if inspect.isawaitable(callback_result):
+                                task = asyncio.create_task(callback_result)
+                                task.add_done_callback(_on_callback_done)
+                        except Exception:
+                            # Streaming side effects must not break LLM call
+                            logger.exception("on_stream_chunk callback failed")
+
+                delta_tool_calls = getattr(delta, "tool_calls", None) or []
+                for tc_delta in delta_tool_calls:
+                    index = getattr(tc_delta, "index", None)
+                    if index is None and isinstance(tc_delta, dict):
+                        index = tc_delta.get("index")
+                    if index is None:
+                        index = 0
+
+                    if index not in tool_calls_buffer:
+                        tool_calls_buffer[index] = {
+                            "id": "",
+                            "name": "",
+                            "arguments": "",
+                        }
+
+                    tc_id = getattr(tc_delta, "id", None)
+                    if tc_id is None and isinstance(tc_delta, dict):
+                        tc_id = tc_delta.get("id")
+                    if tc_id:
+                        tool_calls_buffer[index]["id"] = tc_id
+
+                    func = getattr(tc_delta, "function", None)
+                    if func is None and isinstance(tc_delta, dict):
+                        func = tc_delta.get("function")
+                    if not func:
+                        continue
+
+                    func_name = getattr(func, "name", None)
+                    if func_name is None and isinstance(func, dict):
+                        func_name = func.get("name")
+                    if func_name:
+                        tool_calls_buffer[index]["name"] = func_name
+
+                    func_arguments = getattr(func, "arguments", None)
+                    if func_arguments is None and isinstance(func, dict):
+                        func_arguments = func.get("arguments")
+                    if func_arguments:
+                        tool_calls_buffer[index]["arguments"] += func_arguments
+
+            print()  # Newline after streaming
+            print("-" * 20)
+
+            full_response = "".join(collected_messages).strip()
+
+            tool_calls: List[dict] = []
+            for idx in sorted(tool_calls_buffer.keys()):
+                tc = tool_calls_buffer[idx]
+                tool_id = tc.get("id") or f"call_{uuid.uuid4().hex[:24]}"
+                tool_name = tc.get("name") or ""
+                arguments_str = tc.get("arguments") or ""
+
+                parsed_args = {}
+                parse_error = None
+                if arguments_str:
+                    try:
+                        parsed_args = json.loads(arguments_str)
+                    except json.JSONDecodeError as exc:
+                        parse_error = str(exc)
+                        logger.error(
+                            "Failed to parse streamed tool arguments. name=%s, args_preview=%s, error=%s",
+                            tool_name,
+                            arguments_str[:200],
+                            parse_error,
+                        )
+
+                tool_call_payload = {
+                    "id": tool_id,
+                    "name": tool_name,
+                    "arguments": parsed_args,
+                }
+                if parse_error:
+                    tool_call_payload["_parse_error"] = parse_error
+                    tool_call_payload["_raw_arguments"] = arguments_str
+
+                tool_calls.append(tool_call_payload)
+
+            if not full_response and not tool_calls:
+                raise ValueError("Empty response from streaming tool LLM")
+
+            # Estimate completion tokens for streaming response (text + tool arguments).
+            completion_text = full_response + "".join(
+                (tc.get("name") or "") + (tc.get("_raw_arguments") or "")
+                for tc in tool_calls
+            )
+            completion_tokens = self.count_tokens(completion_text)
+            logger.info(
+                "[LLM] %s estimated completion tokens for streaming tool response: %s",
+                self.model,
+                completion_tokens,
+            )
+            self.total_completion_tokens += completion_tokens
+
+            return full_response, tool_calls
+
+        except TokenLimitExceeded:
+            raise
+        except ValueError as ve:
+            logger.error(f"Validation error in ask_tool_stream: {ve}")
+            raise
+        except OpenAIError as oe:
+            logger.error(f"OpenAI API error: {oe}")
+            if isinstance(oe, AuthenticationError):
+                logger.error("Authentication failed. Check API key.")
+            elif isinstance(oe, RateLimitError):
+                logger.error("Rate limit exceeded. Consider increasing retry attempts.")
+            elif isinstance(oe, APIError):
+                logger.error(f"API error: {oe}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in ask_tool_stream: {e}")
             raise
 
 
