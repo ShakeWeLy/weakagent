@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weakagent"
-version = "0.1.4"
-description = "A framework for building agents using LLMs."
+version = "0.1.6"
+description = "Add chat agent to weakagent and fix some bugs."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

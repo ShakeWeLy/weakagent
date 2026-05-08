@@ -307,7 +307,18 @@ class LLM:
             print("-"*20)
             completion_text = ""
             async for chunk in response:
-                chunk_message = chunk.choices[0].delta.content or ""
+                # Some OpenAI-compatible providers may yield chunks with empty `choices`
+                # (or with no `delta.content`). Guard to avoid `IndexError`.
+                if not getattr(chunk, "choices", None):
+                    continue
+
+                choice0 = chunk.choices[0]
+                delta = getattr(choice0, "delta", None)
+                chunk_message = getattr(delta, "content", None) or ""
+
+                if not chunk_message:
+                    continue
+
                 collected_messages.append(chunk_message)
                 completion_text += chunk_message
                 print(chunk_message, end="", flush=True)
@@ -474,7 +485,18 @@ class LLM:
             print("-"*20)
             collected_messages = []
             async for chunk in response:
-                chunk_message = chunk.choices[0].delta.content or ""
+                # Some OpenAI-compatible providers may yield chunks with empty `choices`
+                # (or with no `delta.content`). Guard to avoid `IndexError`.
+                if not getattr(chunk, "choices", None):
+                    continue
+
+                choice0 = chunk.choices[0]
+                delta = getattr(choice0, "delta", None)
+                chunk_message = getattr(delta, "content", None) or ""
+
+                if not chunk_message:
+                    continue
+
                 collected_messages.append(chunk_message)
                 print(chunk_message, end="", flush=True)
             if not collected_messages:
