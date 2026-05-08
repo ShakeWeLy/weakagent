@@ -3,6 +3,7 @@ from weakagent.schemas.message import Message
 from weakagent.agent.base import BaseAgent
 from weakagent.memory.short import ShortMemory
 from weakagent.schemas.agent import AgentState
+from weakagent.memory.base import MemoryCleanupStrategy
 
 CHAT_SYSTEM_PROMPT = """
 You are a helpful and natural conversational assistant.
@@ -28,7 +29,12 @@ class ChatAgent(BaseAgent):
     system_prompt: str = CHAT_SYSTEM_PROMPT
     next_step_prompt: str = "You are a chat agent that can chat with the user."
     llm: LLM = LLM()
-    memory: ShortMemory = ShortMemory()
+    memory: ShortMemory = ShortMemory(
+        cleanup_strategy=MemoryCleanupStrategy.TRUNCATE_TOOL_OUTPUT,
+        truncate_tool_chars=1500,
+        keep_last_n=50,
+    )
+
     state: AgentState = AgentState.IDLE
     max_steps: int = 1
     current_step: int = 0

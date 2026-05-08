@@ -142,6 +142,15 @@ class BaseAgent(BaseModel, ABC):
             ):
                 self.current_step += 1
                 logger.info(f"Executing step {self.current_step}/{self.max_steps}")
+
+                # Memory hygiene before each step (before any potential LLM call in step()).
+                cleanup = getattr(self.memory, "cleanup_if_needed", None)
+                if callable(cleanup):
+                    try:
+                        await cleanup(llm=self.llm)
+                    except Exception as e:
+                        logger.warning(f"Memory cleanup failed: {e}")
+
                 step_result = await self.step()
 
                 # Check for stuck state

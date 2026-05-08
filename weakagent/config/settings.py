@@ -58,6 +58,16 @@ class LLMSettings(BaseModel):
         description="是否使用 max_completion_tokens（如 o1 等推理型接口），否则用 max_tokens",
     )
 
+    # Optional: token window management (prompt + completion must fit context_window)
+    context_window: Optional[int] = Field(
+        None,
+        description="模型上下文窗口大小（token）。若为 None 则不做窗口检测/压缩。",
+    )
+    reserve_completion_tokens: Optional[int] = Field(
+        None,
+        description="为输出预留的 completion tokens。默认回退到 max_tokens。",
+    )
+
 
 class _AppConfig(BaseModel):
     """仅承载多 profile 的 LLM 配置。"""
@@ -110,6 +120,8 @@ class Config:
             "temperature": base_llm.get("temperature", 1.0),
             "supports_images": base_llm.get("supports_images", False),
             "use_max_completion_tokens": base_llm.get("use_max_completion_tokens", False),
+            "context_window": base_llm.get("context_window"),
+            "reserve_completion_tokens": base_llm.get("reserve_completion_tokens"),
         }
 
         llm_dict: Dict[str, LLMSettings] = {

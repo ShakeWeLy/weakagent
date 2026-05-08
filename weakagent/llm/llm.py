@@ -55,6 +55,10 @@ class LLM:
         self.base_url = llm_config.base_url
         self.supports_images = llm_config.supports_images
         self.use_max_completion_tokens = llm_config.use_max_completion_tokens
+        self.context_window = getattr(llm_config, "context_window", None)
+        self.reserve_completion_tokens = getattr(
+            llm_config, "reserve_completion_tokens", None
+        )
 
         # Add token counting related attributes
         self.total_input_tokens = 0
