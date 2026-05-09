@@ -29,30 +29,29 @@ class RunSubAgentTool(BaseTool):
         caller_agent_id: str | None = None,
     ) -> ToolExecutionResult:
         # Delayed imports to avoid circular dependency
-        from weakagent.agent.factory import AgentFactory
-        from weakagent.agent.manager import AgentManager
+        from weakagent.agent.runtime import AgentRuntime
 
         if not sub_agent_name:
             return self.fail_response("sub_agent_name is required")
 
-        manager = AgentManager.get_instance()
-        if manager is None:
+        runtime = AgentRuntime.get_instance()
+        if runtime is None:
             return self.fail_response(
-                "AgentManager singleton not initialized. "
-                "Call `await AgentManager.instance()` first."
+                "AgentRuntime singleton not initialized. "
+                "Call `await AgentRuntime.instance()` first."
             )
 
         # Validate sub-agent name via factory
-        factory = manager.factory
+        factory = runtime.factory
         if sub_agent_name not in factory.supported_types:
             return self.fail_response(
                 f"Unknown sub-agent name: {sub_agent_name}. "
                 f"Supported types: {', '.join(factory.supported_types)}"
             )
 
-        # Create and register the sub-agent under parent (caller) via manager
+        # Create and register the sub-agent under parent (caller) via runtime
         try:
-            sub_agent_id = manager.create_agent(
+            sub_agent_id = runtime.create_agent(
                 sub_agent_name,
                 parent_id=caller_agent_id,
             )
@@ -64,7 +63,7 @@ class RunSubAgentTool(BaseTool):
         # Update caller's active sub-agent pointer when available.
         if caller_agent_id:
             try:
-                caller = manager.get(caller_agent_id)
+                caller = runtime.get(caller_agent_id)
                 if hasattr(caller, "current_sub_agent_id"):
                     setattr(caller, "current_sub_agent_id", sub_agent_id)
             except Exception:
@@ -72,7 +71,7 @@ class RunSubAgentTool(BaseTool):
 
         # Run the sub-agent
         try:
-            child_result = await manager.run(sub_agent_id, request=request)
+            child_result = await runtime.run(sub_agent_id, request=request)
         except Exception as exc:
             return self.fail_response(
                 f"sub-agent `{sub_agent_name}` execution failed: {exc}"

@@ -53,24 +53,6 @@ class AgentFactory:
             return True
         return False
 
-    def get_type_descriptions(self) -> Dict[str, Dict[str, str]]:
-        """Return name+description mapping for registered agent types.
-
-        Returns:
-            Dict mapping agent_type to {name, description}:
-            {
-                "chat": {"name": "chat", "description": "..."},
-                "toolcall": {"name": "toolcall", "description": "..."},
-            }
-        """
-        return {
-            agent_type: {
-                "name": getattr(agent_cls, "name", agent_type),
-                "description": getattr(agent_cls, "description", ""),
-            }
-            for agent_type, agent_cls in self._registry.items()
-        }
-
     def create(
         self,
         agent_type: str,

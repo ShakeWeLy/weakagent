@@ -24,7 +24,9 @@ class BriefReActMultiAgent(BriefReActAgent):
         CreateChatCompletion(), RunSubAgentTool(), Terminate()
     )
 
-    # Using Any to avoid circular import with AgentManager
+    # Using Any to avoid circular import with AgentRuntime
+    agent_runtime: Optional[Any] = None
+    # Backward-compatible alias field; still supported in runtime wiring.
     agent_manager: Optional[Any] = None
     managed_agent_id: Optional[str] = None
     current_sub_agent_id: Optional[str] = None

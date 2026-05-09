@@ -1,5 +1,5 @@
 """
-Demo for AgentFactory + AgentManager.
+Demo for AgentFactory + AgentRuntime.
 
 Shows:
 1) Create a parent agent
@@ -10,21 +10,21 @@ Shows:
 
 import asyncio
 
-from weakagent.agent import AgentManager
+from weakagent.agent import AgentRuntime
 
 
 async def main() -> None:
-    manager = AgentManager()
+    runtime = await AgentRuntime.instance()
 
     # 1) Create parent agent
-    parent_id = manager.create_agent(
+    parent_id = runtime.create_agent(
         "chat",
         name="parent_chat_agent",
         config_name="default",
     )
 
     # 2) Spawn sub agent
-    child_id = manager.spawn_sub_agent(
+    child_id = runtime.spawn_sub_agent(
         parent_id=parent_id,
         agent_type="chat",
         name="child_chat_agent",
@@ -33,13 +33,13 @@ async def main() -> None:
 
     print(f"Parent agent id: {parent_id}")
     print(f"Child  agent id: {child_id}")
-    print(f"Children of parent: {manager.list_agents(parent_id=parent_id)}")
+    print(f"Children of parent: {runtime.list_agents(parent_id=parent_id)}")
 
     # 3) Run parent + child concurrently
-    parent_task = manager.run_in_background(
-        parent_id, request="Please summarize what an agent manager does."
+    parent_task = runtime.run_in_background(
+        parent_id, request="Please summarize what an agent runtime does."
     )
-    child_task = manager.run_in_background(
+    child_task = runtime.run_in_background(
         child_id, request="Please give 3 short tips for sub-agent orchestration."
     )
 
@@ -52,7 +52,7 @@ async def main() -> None:
             print(result)
 
     # 4) Cleanup all agents/resources/tasks
-    await manager.cleanup_all()
+    await runtime.cleanup_all()
     print("\nCleanup complete.")
 
 

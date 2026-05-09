@@ -2,8 +2,8 @@
 from .base import BaseAgent
 from .brief_react import BriefReActAgent
 from .factory import AgentFactory
-from .manager import AgentManager
 from .multi_react import BriefReActMultiAgent
+from .runtime import AgentManager, AgentRuntime
 from .toolcall import ToolCallAgent
 
 __all__ = [
@@ -12,5 +12,6 @@ __all__ = [
     "BriefReActMultiAgent",
     "ToolCallAgent",
     "AgentFactory",
+    "AgentRuntime",
     "AgentManager",
 ]
