@@ -1,0 +1,6 @@
+---
+description: 
+alwaysApply: true
+---
+
+Add concise engineering-style comments to key logic sections (not too many)) and write clear docstrings for important functions, including Args and Returns. Focus on design intent, data flow, and potential pitfalls instead of commenting every line.
