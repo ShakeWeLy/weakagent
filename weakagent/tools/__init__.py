@@ -5,7 +5,7 @@ from .tool_collection import ToolCollection
 from .create_chat_completion import CreateChatCompletion
 from .terminate import Terminate
 from .summary import Summary
-from .sub_agent import RunSubAgentTool
+from .sub_agent import CreateSubAgentTool, RunSubAgentTool
 
 __all__ = [
     "BaseTool",
@@ -14,5 +14,6 @@ __all__ = [
     "CreateChatCompletion",
     "Terminate",
     "Summary",
+    "CreateSubAgentTool",
     "RunSubAgentTool",
 ]

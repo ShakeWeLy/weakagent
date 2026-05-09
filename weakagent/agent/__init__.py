@@ -1,9 +1,9 @@
 """Agent module for WeakAgent."""
 from .base import BaseAgent
 from .brief_react import BriefReActAgent
-from .factory import AgentFactory
+from .factory import AgentFactory, AgentSpec
 from .multi_react import BriefReActMultiAgent
-from .runtime import AgentManager, AgentRuntime
+from .runtime import AgentRuntime
 from .toolcall import ToolCallAgent
 
 __all__ = [
@@ -12,6 +12,6 @@ __all__ = [
     "BriefReActMultiAgent",
     "ToolCallAgent",
     "AgentFactory",
+    "AgentSpec",
     "AgentRuntime",
-    "AgentManager",
 ]
