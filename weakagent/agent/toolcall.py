@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from typing import Any, List, Optional, Union
 
 from pydantic import Field
@@ -155,13 +156,13 @@ class ToolCallAgent(ReActAgent):
             )
 
             # Add tool response to memory
-            tool_msg = Message.tool_message(
-                content=result,
+            self.update_memory(
+                "tool",
+                result,
                 tool_call_id=command.id,
                 name=command.function.name,
                 base64_image=self._current_base64_image,
             )
-            self.memory.add_message(tool_msg)
             results.append(result)
 
         return "\n\n".join(results)
@@ -181,7 +182,18 @@ class ToolCallAgent(ReActAgent):
 
             # Execute the tool
             logger.info(f"🔧 Activating tool: '{name}'...")
+            self._emit_event(
+                "agent_tool_call_start",
+                {
+                    "tool_name": name,
+                    "tool_call_id": getattr(command, "id", None),
+                    "args": args,
+                    "current_step": getattr(self, "current_step", 0),
+                },
+            )
+            t0 = time.perf_counter()
             result = await self.available_tools.execute(name=name, tool_input=args)
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
             # Handle special tools
             await self._handle_special_tool(name=name, result=result)
@@ -198,16 +210,48 @@ class ToolCallAgent(ReActAgent):
                 else f"Cmd `{name}` completed with no output: {result.error}"
             )
 
+            self._emit_event(
+                "agent_tool_call_end",
+                {
+                    "tool_name": name,
+                    "tool_call_id": getattr(command, "id", None),
+                    "current_step": getattr(self, "current_step", 0),
+                    "duration_ms": elapsed_ms,
+                    "success": bool(getattr(result, "success", False)),
+                    "output_len": len((getattr(result, "output", "") or "")),
+                    "error": getattr(result, "error", None),
+                },
+            )
             return observation
         except json.JSONDecodeError:
             error_msg = f"Error parsing arguments for {name}: Invalid JSON format"
             logger.error(
                 f"📝 Oops! The arguments for '{name}' don't make sense - invalid JSON, arguments:{command.function.arguments}"
             )
+            self._emit_event(
+                "agent_tool_call_end",
+                {
+                    "tool_name": name,
+                    "tool_call_id": getattr(command, "id", None),
+                    "current_step": getattr(self, "current_step", 0),
+                    "success": False,
+                    "error": "Invalid JSON arguments",
+                },
+            )
             return f"Error: {error_msg}"
         except Exception as e:
             error_msg = f"⚠️ Tool '{name}' encountered a problem: {str(e)}"
             logger.exception(error_msg)
+            self._emit_event(
+                "agent_tool_call_end",
+                {
+                    "tool_name": name,
+                    "tool_call_id": getattr(command, "id", None),
+                    "current_step": getattr(self, "current_step", 0),
+                    "success": False,
+                    "error": str(e),
+                },
+            )
             return f"Error: {error_msg}"
 
     async def _handle_special_tool(self, name: str, result: Any, **kwargs):

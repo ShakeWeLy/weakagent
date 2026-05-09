@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
+import asyncio
 from contextlib import asynccontextmanager
-from typing import List, Optional
+import inspect
+import time
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -11,6 +14,8 @@ from weakagent.memory.short import ShortMemory
 from weakagent.schemas.agent import AgentState
 
 logger = get_logger(__name__)
+
+EventCallback = Callable[[dict], Union[Any, Awaitable[Any]]]
 
 
 class BaseAgent(BaseModel, ABC):
@@ -38,6 +43,9 @@ class BaseAgent(BaseModel, ABC):
     state: AgentState = Field(
         default=AgentState.IDLE, description="Current agent state"
     )
+    on_event: Optional[EventCallback] = Field(
+        default=None, description="Optional event callback for agent lifecycle events"
+    )
 
     # Execution control
     max_steps: int = Field(default=10, description="Maximum steps before termination")
@@ -49,6 +57,52 @@ class BaseAgent(BaseModel, ABC):
         arbitrary_types_allowed=True,
         extra="allow",
     )
+
+    def _emit_event(self, event_type: str, data: Optional[dict] = None) -> None:
+        """Emit an event to callbacks (sync/async; isolated failures).
+
+        Delivery order:
+        1) self.on_event (if set)
+        2) runtime.on_event (if agent is runtime-managed and runtime exposes on_event)
+        """
+
+        event = {
+            "type": event_type,
+            "timestamp": time.time(),
+            "data": data or {},
+        }
+
+        def _dispatch(cb: Any) -> None:
+            if cb is None:
+                return
+            try:
+                result = cb(event)
+                if inspect.isawaitable(result):
+                    task = asyncio.create_task(result)
+
+                    def _on_done(t: asyncio.Task) -> None:
+                        try:
+                            exc = t.exception()
+                        except asyncio.CancelledError:
+                            return
+                        except Exception:
+                            logger.exception(
+                                "Unexpected error while checking on_event task"
+                            )
+                            return
+                        if exc is not None:
+                            logger.exception("on_event async callback failed", exc_info=exc)
+
+                    task.add_done_callback(_on_done)
+            except Exception as e:
+                logger.error(f"Event callback error: {e}")
+
+        _dispatch(self.on_event)
+
+        runtime = getattr(self, "agent_runtime", None)
+        runtime_cb = getattr(runtime, "on_event", None) if runtime is not None else None
+        if runtime_cb is not self.on_event:
+            _dispatch(runtime_cb)
 
     @model_validator(mode="after")
     def initialize_agent(self) -> "BaseAgent":
@@ -116,6 +170,14 @@ class BaseAgent(BaseModel, ABC):
         # Create message with appropriate parameters based on role
         kwargs = {"base64_image": base64_image, **(kwargs if role == "tool" else {})}
         self.memory.add_message(message_map[role](content, **kwargs))
+        self._emit_event(
+            "agent_memory_add",
+            {
+                "role": role,
+                "content_len": len(content or ""),
+                "has_image": bool(base64_image),
+            },
+        )
 
     async def run(self, request: Optional[str] = None) -> str:
         """Execute the agent's main loop asynchronously.
@@ -136,12 +198,28 @@ class BaseAgent(BaseModel, ABC):
             self.update_memory("user", request)
 
         results: List[str] = []
+        self._emit_event(
+            "agent_run_start",
+            {
+                "name": self.name,
+                "max_steps": self.max_steps,
+                "request_len": len(request or ""),
+            },
+        )
         async with self.state_context(AgentState.RUNNING):
             while (
                 self.current_step < self.max_steps and self.state != AgentState.FINISHED
             ):
                 self.current_step += 1
                 logger.info(f"Executing step {self.current_step}/{self.max_steps}")
+                self._emit_event(
+                    "agent_step_start",
+                    {
+                        "name": self.name,
+                        "current_step": self.current_step,
+                        "max_steps": self.max_steps,
+                    },
+                )
 
                 # Memory hygiene before each step (before any potential LLM call in step()).
                 cleanup = getattr(self.memory, "cleanup_if_needed", None)
@@ -152,6 +230,15 @@ class BaseAgent(BaseModel, ABC):
                         logger.warning(f"Memory cleanup failed: {e}")
 
                 step_result = await self.step()
+                self._emit_event(
+                    "agent_step_end",
+                    {
+                        "name": self.name,
+                        "current_step": self.current_step,
+                        "max_steps": self.max_steps,
+                        "result_len": len(step_result or ""),
+                    },
+                )
 
                 # Check for stuck state
                 if self.is_stuck():
@@ -163,7 +250,17 @@ class BaseAgent(BaseModel, ABC):
                 self.current_step = 0
                 self.state = AgentState.IDLE
                 results.append(f"Terminated: Reached max steps ({self.max_steps})")
-        return "\n".join(results) if results else "No steps executed"
+        output = "\n".join(results) if results else "No steps executed"
+        self._emit_event(
+            "agent_run_end",
+            {
+                "name": self.name,
+                "current_step": self.current_step,
+                "state": str(self.state),
+                "output_len": len(output),
+            },
+        )
+        return output
 
     @abstractmethod
     async def step(self) -> str:
