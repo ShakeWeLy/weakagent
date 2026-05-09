@@ -84,9 +84,6 @@ class AgentRuntime:
         # Auto-wire runtime context for multi-agent capable implementations.
         if hasattr(agent, "agent_runtime"):
             setattr(agent, "agent_runtime", AgentRuntime._instance)
-        # Backward compatibility for older field name.
-        if hasattr(agent, "agent_manager"):
-            setattr(agent, "agent_manager", AgentRuntime._instance)
         if hasattr(agent, "managed_agent_id"):
             setattr(agent, "managed_agent_id", resolved_id)
 
@@ -251,7 +248,3 @@ class AgentRuntime:
         for agent_id in list(self._agents.keys()):
             if agent_id in self._agents:
                 await self.cleanup(agent_id, recursive=True)
-
-
-# Backward-compatible alias.
-AgentManager = AgentRuntime
