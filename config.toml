@@ -32,3 +32,7 @@ base_url = "https://api.anthropic.com/v1/" # API endpoint URL for vision model
 api_key = "YOUR_API_KEY"                   # Your API key for vision model
 max_tokens = 8192                          # Maximum number of tokens in the response
 temperature = 0.0                          # Controls randomness for vision model
+
+[scheduler]
+# SQLite path for TaskStore. Relative paths are resolved from project root (config.toml directory).
+db_path = "tasks.sqlite3"
