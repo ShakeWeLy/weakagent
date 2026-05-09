@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weakagent"
-version = "0.1.7"
-description = "Add memory cleanup strategy to weakagent."
+version = "0.2.0"
+description = "Introduce multi-agent capabilities to weakagent."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
