@@ -8,6 +8,7 @@ LLM 客户端：仅使用 OpenAI Python SDK（``AsyncOpenAI``），
 import asyncio
 import inspect
 import json
+import time
 import uuid
 from typing import Any, Awaitable, Callable, List, Optional, Union
 
@@ -44,13 +45,17 @@ from weakagent.schemas.tool import (
 
 logger = get_logger(__name__)
 
-StreamChunkCallback = Callable[[str], Union[Any, Awaitable[Any]]]
+EventCallback = Callable[[dict], Union[Any, Awaitable[Any]]]
 
 
 
 class LLM:
     def __init__(
-        self, config_name: str = "default", llm_config: Optional[LLMSettings] = None
+        self,
+        config_name: str = "default",
+        llm_config: Optional[LLMSettings] = None,
+        *,
+        on_event: Optional[EventCallback] = None,
     ):
         llm_config = llm_config or config.llm
         llm_config = llm_config.get(config_name, llm_config["default"])
@@ -85,6 +90,44 @@ class LLM:
         self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
 
         self.token_counter = TokenCounter(self.tokenizer)
+        self.on_event = on_event
+
+    def _emit_event(
+        self,
+        event_type: str,
+        data: Optional[dict] = None,
+        *,
+        on_event: Optional[EventCallback] = None,
+    ) -> None:
+        """Emit an event to `on_event` callback (sync/async; isolated failures)."""
+        cb = on_event if on_event is not None else self.on_event
+        if cb is None:
+            return
+        try:
+            result = cb(
+                {
+                    "type": event_type,
+                    "timestamp": time.time(),
+                    "data": data or {},
+                }
+            )
+            if inspect.isawaitable(result):
+                task = asyncio.create_task(result)
+
+                def _on_event_done(t: asyncio.Task) -> None:
+                    try:
+                        exc = t.exception()
+                    except asyncio.CancelledError:
+                        return
+                    except Exception:
+                        logger.exception("Unexpected error while checking on_event task")
+                        return
+                    if exc is not None:
+                        logger.exception("on_event async callback failed", exc_info=exc)
+
+                task.add_done_callback(_on_event_done)
+        except Exception as e:
+            logger.error(f"Event callback error: {e}")
 
     def count_tokens(self, text: str) -> int:
         """Calculate the number of tokens in a text"""
@@ -252,7 +295,7 @@ class LLM:
         stream: bool = True,
         temperature: Optional[float] = None,
         verbose: bool = False,
-        on_stream_chunk: Optional[StreamChunkCallback] = None,
+        on_event: Optional[EventCallback] = None,
     ) -> str:
         """
         Send a prompt to the LLM and get the response.
@@ -263,8 +306,8 @@ class LLM:
             stream (bool): Whether to stream the response
             temperature (float): Sampling temperature for the response
             verbose (bool): Whether to print the messages.
-            on_stream_chunk: Optional callback invoked for each streamed text chunk.
-                Supports both sync and async callables; callback failures are isolated.
+            on_event: Optional event callback (sync/async). If not provided, uses `self.on_event`.
+                Intended for streaming side-effects (front-end push, TTS, etc.). Failures are isolated.
         Returns:
             str: The generated response
 
@@ -337,18 +380,15 @@ class LLM:
             print("-"*20)
             completion_text = ""
 
-            def _on_callback_done(task: asyncio.Task) -> None:
-                try:
-                    exc = task.exception()
-                except asyncio.CancelledError:
-                    return
-                except Exception:
-                    logger.exception("Unexpected error while checking stream callback task")
-                    return
-                if exc is not None:
-                    logger.exception(
-                        "on_stream_chunk async callback failed", exc_info=exc
-                    )
+            self._emit_event(
+                "llm_stream_start",
+                {
+                    "model": self.model,
+                    "input_tokens": input_tokens,
+                    "stream": True,
+                },
+                on_event=on_event,
+            )
 
             async for chunk in response:
                 # Some OpenAI-compatible providers may yield chunks with empty `choices`
@@ -366,15 +406,14 @@ class LLM:
                 collected_messages.append(chunk_message)
                 completion_text += chunk_message
                 print(chunk_message, end="", flush=True)
-                if on_stream_chunk is not None:
-                    try:
-                        callback_result = on_stream_chunk(chunk_message)
-                        if inspect.isawaitable(callback_result):
-                            task = asyncio.create_task(callback_result)
-                            task.add_done_callback(_on_callback_done)
-                    except Exception:
-                        # Streaming side effects (e.g. TTS/front-end push) must not break LLM call
-                        logger.exception("on_stream_chunk callback failed")
+                self._emit_event(
+                    "llm_stream_chunk",
+                    {
+                        "text": chunk_message,
+                        "accumulated_text_len": len(completion_text),
+                    },
+                    on_event=on_event,
+                )
             if not completion_text:
                 print("No print content from LLM")
             print()  # Newline after streaming
@@ -392,6 +431,15 @@ class LLM:
             )
             self.total_completion_tokens += completion_tokens
 
+            self._emit_event(
+                "llm_stream_end",
+                {
+                    "model": self.model,
+                    "estimated_completion_tokens": completion_tokens,
+                    "output_text_len": len(full_response),
+                },
+                on_event=on_event,
+            )
             return full_response
 
         except TokenLimitExceeded:
@@ -399,6 +447,11 @@ class LLM:
             raise
         except ValueError:
             logger.exception(f"Validation error")
+            self._emit_event(
+                "llm_error",
+                {"kind": "ValueError"},
+                on_event=on_event,
+            )
             raise
         except OpenAIError as oe:
             logger.exception(f"OpenAI API error")
@@ -408,9 +461,19 @@ class LLM:
                 logger.error("Rate limit exceeded. Consider increasing retry attempts.")
             elif isinstance(oe, APIError):
                 logger.error(f"API error: {oe}")
+            self._emit_event(
+                "llm_error",
+                {"kind": "OpenAIError", "error_type": oe.__class__.__name__},
+                on_event=on_event,
+            )
             raise
         except Exception:
             logger.exception(f"Unexpected error in ask")
+            self._emit_event(
+                "llm_error",
+                {"kind": "Exception"},
+                on_event=on_event,
+            )
             raise
 
     @retry(
@@ -427,7 +490,7 @@ class LLM:
         system_msgs: Optional[List[Union[dict, Message]]] = None,
         stream: bool = False,
         temperature: Optional[float] = None,
-        on_stream_chunk: Optional[StreamChunkCallback] = None,
+        on_event: Optional[EventCallback] = None,
     ) -> str:
         """
         Send a prompt with images to the LLM and get the response.
@@ -438,8 +501,8 @@ class LLM:
             system_msgs: Optional system messages to prepend
             stream (bool): Whether to stream the response
             temperature (float): Sampling temperature for the response
-            on_stream_chunk: Optional callback invoked for each streamed text chunk.
-                Supports both sync and async callables; callback failures are isolated.
+            on_event: Optional event callback (sync/async). If not provided, uses `self.on_event`.
+                Intended for streaming side-effects (front-end push, TTS, etc.). Failures are isolated.
 
         Returns:
             str: The generated response
@@ -541,19 +604,18 @@ class LLM:
 
             print("-"*20)
             collected_messages = []
+            completion_text = ""
 
-            def _on_callback_done(task: asyncio.Task) -> None:
-                try:
-                    exc = task.exception()
-                except asyncio.CancelledError:
-                    return
-                except Exception:
-                    logger.exception("Unexpected error while checking stream callback task")
-                    return
-                if exc is not None:
-                    logger.exception(
-                        "on_stream_chunk async callback failed", exc_info=exc
-                    )
+            self._emit_event(
+                "llm_stream_start",
+                {
+                    "model": self.model,
+                    "input_tokens": input_tokens,
+                    "stream": True,
+                    "with_images": True,
+                },
+                on_event=on_event,
+            )
 
             async for chunk in response:
                 # Some OpenAI-compatible providers may yield chunks with empty `choices`
@@ -569,16 +631,16 @@ class LLM:
                     continue
 
                 collected_messages.append(chunk_message)
+                completion_text += chunk_message
                 print(chunk_message, end="", flush=True)
-                if on_stream_chunk is not None:
-                    try:
-                        callback_result = on_stream_chunk(chunk_message)
-                        if inspect.isawaitable(callback_result):
-                            task = asyncio.create_task(callback_result)
-                            task.add_done_callback(_on_callback_done)
-                    except Exception:
-                        # Streaming side effects (e.g. TTS/front-end push) must not break LLM call
-                        logger.exception("on_stream_chunk callback failed")
+                self._emit_event(
+                    "llm_stream_chunk",
+                    {
+                        "text": chunk_message,
+                        "accumulated_text_len": len(completion_text),
+                    },
+                    on_event=on_event,
+                )
             if not collected_messages:
                 print("No print content from LLM")
             print()  # Newline after streaming
@@ -588,6 +650,17 @@ class LLM:
             if not full_response:
                 raise ValueError("Empty response from streaming LLM")
 
+            completion_tokens = self.count_tokens(completion_text)
+            self._emit_event(
+                "llm_stream_end",
+                {
+                    "model": self.model,
+                    "estimated_completion_tokens": completion_tokens,
+                    "output_text_len": len(full_response),
+                    "with_images": True,
+                },
+                on_event=on_event,
+            )
             return full_response
 
         except TokenLimitExceeded:
@@ -763,7 +836,7 @@ class LLM:
         tool_choice: TOOL_CHOICE_TYPE = ToolChoice.AUTO,  # type: ignore
         temperature: Optional[float] = None,
         verbose: bool = False,
-        on_stream_chunk: Optional[StreamChunkCallback] = None,
+        on_event: Optional[EventCallback] = None,
         **kwargs,
     ) -> tuple[str, List[dict]]:
         """
@@ -777,8 +850,8 @@ class LLM:
             tool_choice: Tool choice strategy
             temperature: Sampling temperature for the response
             verbose (bool): Whether to print the messages.
-            on_stream_chunk: Optional callback invoked for each streamed text chunk.
-                Supports both sync and async callables; callback failures are isolated.
+            on_event: Optional event callback (sync/async). If not provided, uses `self.on_event`.
+                Intended for streaming side-effects (front-end push, TTS, etc.). Failures are isolated.
             **kwargs: Additional completion arguments
 
         Returns:
@@ -846,22 +919,20 @@ class LLM:
 
             print("-" * 20)
             collected_messages: List[str] = []
+            completion_text = ""
             tool_calls_buffer: dict[int, dict] = {}
 
-            def _on_callback_done(task: asyncio.Task) -> None:
-                try:
-                    exc = task.exception()
-                except asyncio.CancelledError:
-                    return
-                except Exception:
-                    logger.exception(
-                        "Unexpected error while checking stream callback task"
-                    )
-                    return
-                if exc is not None:
-                    logger.exception(
-                        "on_stream_chunk async callback failed", exc_info=exc
-                    )
+            self._emit_event(
+                "llm_stream_start",
+                {
+                    "model": self.model,
+                    "input_tokens": input_tokens,
+                    "stream": True,
+                    "with_tools": True,
+                    "tool_choice": tool_choice,
+                },
+                on_event=on_event,
+            )
 
             async for chunk in response:
                 if not getattr(chunk, "choices", None):
@@ -875,16 +946,17 @@ class LLM:
                 chunk_message = getattr(delta, "content", None) or ""
                 if chunk_message:
                     collected_messages.append(chunk_message)
+                    completion_text += chunk_message
                     print(chunk_message, end="", flush=True)
-                    if on_stream_chunk is not None:
-                        try:
-                            callback_result = on_stream_chunk(chunk_message)
-                            if inspect.isawaitable(callback_result):
-                                task = asyncio.create_task(callback_result)
-                                task.add_done_callback(_on_callback_done)
-                        except Exception:
-                            # Streaming side effects must not break LLM call
-                            logger.exception("on_stream_chunk callback failed")
+                    self._emit_event(
+                        "llm_stream_chunk",
+                        {
+                            "text": chunk_message,
+                            "accumulated_text_len": len(completion_text),
+                            "with_tools": True,
+                        },
+                        on_event=on_event,
+                    )
 
                 delta_tool_calls = getattr(delta, "tool_calls", None) or []
                 for tc_delta in delta_tool_calls:
@@ -978,6 +1050,16 @@ class LLM:
             )
             self.total_completion_tokens += completion_tokens
 
+            self._emit_event(
+                "llm_stream_end",
+                {
+                    "model": self.model,
+                    "estimated_completion_tokens": completion_tokens,
+                    "output_text_len": len(full_response),
+                    "with_tools": True,
+                },
+                on_event=on_event,
+            )
             return full_response, tool_calls
 
         except TokenLimitExceeded:

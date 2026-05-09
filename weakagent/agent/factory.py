@@ -65,6 +65,7 @@ class AgentFactory:
             return True
         return False
 
+    # find spec by agent_type and build payload from kwargs
     def create(
         self,
         agent_type: str,
@@ -82,10 +83,11 @@ class AgentFactory:
                 f"Supported types: {', '.join(self.supported_types)}"
             )
 
+        # build payload from kwargs
         payload = spec.build_payload(dict(kwargs))
+        # override name and llm if provided
         if name is not None:
             payload["name"] = name
-
         if llm is not None:
             payload["llm"] = llm
         elif config_name:
