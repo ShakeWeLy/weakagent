@@ -67,10 +67,9 @@ class ToolCallAgent(ReActAgent):
                 logger.error(
                     f"🚨 Token limit error (from RetryError): {token_limit_error}"
                 )
-                self.memory.add_message(
-                    Message.assistant_message(
-                        f"Maximum token limit reached, cannot continue execution: {str(token_limit_error)}"
-                    )
+                self.update_memory(
+                    "assistant",
+                    f"Maximum token limit reached, cannot continue execution: {str(token_limit_error)}",
                 )
                 self.state = AgentState.FINISHED
                 return False
@@ -103,7 +102,7 @@ class ToolCallAgent(ReActAgent):
                         f"🤔 Hmm, {self.name} tried to use tools when they weren't available!"
                     )
                 if content:
-                    self.memory.add_message(Message.assistant_message(content))
+                    self.update_memory("assistant", content)
                     return True
                 return False
 
@@ -113,7 +112,7 @@ class ToolCallAgent(ReActAgent):
                 if self.tool_calls
                 else Message.assistant_message(content)
             )
-            self.memory.add_message(assistant_msg)
+            self.append_message(assistant_msg)
 
             if self.tool_choices == ToolChoice.REQUIRED and not self.tool_calls:
                 return True  # Will be handled in act()
@@ -125,10 +124,9 @@ class ToolCallAgent(ReActAgent):
             return bool(self.tool_calls)
         except Exception as e:
             logger.error(f"🚨 Oops! The {self.name}'s thinking process hit a snag: {e}")
-            self.memory.add_message(
-                Message.assistant_message(
-                    f"Error encountered while processing: {str(e)}"
-                )
+            self.update_memory(
+                "assistant",
+                f"Error encountered while processing: {str(e)}",
             )
             return False
 

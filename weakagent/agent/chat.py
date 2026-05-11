@@ -43,5 +43,5 @@ class ChatAgent(BaseAgent):
     async def step(self) -> str:
         """Execute a single step in the agent's workflow."""
         content = await self.llm.ask(self.memory.messages, system_msgs=[Message.system_message(self.system_prompt)], temperature=0.0, verbose=True)
-        self.memory.add_message(Message.assistant_message(content))
+        self.update_memory("assistant", content)
         return content

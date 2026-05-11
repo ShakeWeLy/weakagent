@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import inspect
 import time
+import uuid
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -10,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from weakagent.llm import LLM
 from weakagent.utils.logger import get_logger
 from weakagent.schemas.message import ROLE_TYPE, Message
+from weakagent.memory.conversation import ConversationMemory
 from weakagent.memory.short import ShortMemory
 from weakagent.schemas.agent import AgentState
 
@@ -40,6 +42,9 @@ class BaseAgent(BaseModel, ABC):
     # Dependencies
     llm: LLM = Field(default_factory=LLM, description="Language model instance")
     memory: ShortMemory = Field(default_factory=ShortMemory, description="Agent's memory store")
+    conversation: Optional[ConversationMemory] = Field(
+        default=None, description="Persistent conversation store"
+    )
     state: AgentState = Field(
         default=AgentState.IDLE, description="Current agent state"
     )
@@ -111,7 +116,27 @@ class BaseAgent(BaseModel, ABC):
             self.llm = LLM(config_name=self.name.lower())
         if not isinstance(self.memory, ShortMemory):
             self.memory = ShortMemory()
+        if self.conversation is None:
+            self.conversation = ConversationMemory(
+                session_id=f"sess_{self.name}_{uuid.uuid4().hex[:8]}",
+                agent_type=self.name,
+                title=self.description or self.name,
+            )
         return self
+
+    def append_message(self, message: Message, *, extra: Optional[Dict[str, Any]] = None) -> None:
+        """Append message to memory and conversation storage."""
+        self.memory.add_message(message)
+        if self.conversation is None:
+            return
+        persist_extra = {
+            "agent": self.name,
+            "state": str(self.state),
+            "current_step": self.current_step,
+        }
+        if extra:
+            persist_extra.update(extra)
+        self.conversation.add_message(message, extra=persist_extra)
 
     @asynccontextmanager
     async def state_context(self, new_state: AgentState):
@@ -169,7 +194,8 @@ class BaseAgent(BaseModel, ABC):
 
         # Create message with appropriate parameters based on role
         kwargs = {"base64_image": base64_image, **(kwargs if role == "tool" else {})}
-        self.memory.add_message(message_map[role](content, **kwargs))
+        message = message_map[role](content, **kwargs)
+        self.append_message(message)
         self._emit_event(
             "agent_memory_add",
             {
