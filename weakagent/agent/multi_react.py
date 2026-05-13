@@ -2,6 +2,7 @@ import json
 from typing import Any, Optional
 
 from weakagent.agent.brief_react import BriefReActAgent
+from weakagent.prompt.brief_react import ACT_NEXT_STEP_PROMPT
 from weakagent.utils.logger import get_logger
 from weakagent.schemas.tool import ToolCall
 from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate
@@ -9,6 +10,23 @@ from weakagent.tools.sub_agent.create_sub_agent import CreateSubAgentTool
 from weakagent.tools.sub_agent.run_sub_agent import RunSubAgentTool
 
 logger = get_logger(__name__)
+
+ACT_NEXT_STEP_PROMPT = '''
+You are a multi-agent reactor that can run sub-agents via tool call.
+
+You will be given a task and a list of sub-agents.
+You need to decide which sub-agent to run based on the task.
+Sub-agents:
+chat: a chat agent that can chat with the user.
+echo: an echo agent that can echo the user's message.
+reacttoolcall: an agent that git a brieft think, selcet tools to execute tool calls using react.
+
+You need to return the sub-agent id and the request to run the sub-agent, or the answer to the user directly.
+If you need to create a new sub-agent, you need to use the create_sub_agent tool.
+If you need to run a sub-agent, you need to use the run_sub_agent tool.
+If you need to terminate and give a answer to the user directly, you need to use the terminate tool.
+'''
+
 
 class BriefReActMultiAgent(BriefReActAgent):
     """
@@ -21,8 +39,9 @@ class BriefReActMultiAgent(BriefReActAgent):
     description: str = (
         "A multi-agent reactor that can run sub-agents via tool call."
     )
+    # next_step_prompt: str = ACT_NEXT_STEP_PROMPT
     available_tools: ToolCollection = ToolCollection(
-        CreateChatCompletion(), CreateSubAgentTool(), RunSubAgentTool(), Terminate()
+        CreateSubAgentTool(), RunSubAgentTool(), Terminate()
     )
 
     # Using Any to avoid circular import with AgentRuntime

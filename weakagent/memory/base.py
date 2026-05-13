@@ -12,6 +12,7 @@ class MemoryType(str, Enum):
     SHORT = "short"
     LONG = "long"
     WORKING = "working"
+    RUNTIME = "runtime"
 
 
 class MemoryCleanupStrategy(str, Enum):

@@ -19,7 +19,7 @@ class RuntimeMemory(BaseMemory):
     """
 
     messages: List[Message] = Field(default_factory=list)
-    memory_type: MemoryType = Field(default=MemoryType.OTHER)
+    memory_type: MemoryType = Field(default=MemoryType.RUNTIME)
 
     def add_request(self, request: Optional[str]) -> None:
         if request:

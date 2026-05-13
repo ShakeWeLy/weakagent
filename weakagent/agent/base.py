@@ -235,6 +235,13 @@ class BaseAgent(BaseModel, ABC):
         self.short_memory.clear()
         self.last_request = request
         self.final_output = None
+        # Load runtime_memory history into this run's short_memory context.
+        # This lets the agent answer questions like "what did I just ask?" across runs.
+        try:
+            if self.runtime_memory.messages:
+                self.short_memory.add_messages(list(self.runtime_memory.messages))
+        except Exception:
+            logger.exception("Failed to load runtime_memory into short_memory")
         # RuntimeMemory: record request immediately (not cleared after run).
         try:
             self.runtime_memory.add_request(request)
