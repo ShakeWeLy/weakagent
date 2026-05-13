@@ -13,6 +13,7 @@ from weakagent.utils.logger import get_logger
 from weakagent.schemas.message import ROLE_TYPE, Message
 from weakagent.memory.conversation import ConversationMemory
 from weakagent.memory.short import ShortMemory
+from weakagent.memory.runtime_memory import RuntimeMemory
 from weakagent.schemas.agent import AgentState
 
 logger = get_logger(__name__)
@@ -41,10 +42,20 @@ class BaseAgent(BaseModel, ABC):
 
     # Dependencies
     llm: LLM = Field(default_factory=LLM, description="Language model instance")
-    memory: ShortMemory = Field(default_factory=ShortMemory, description="Agent's memory store")
+    short_memory: ShortMemory = Field(
+        default_factory=ShortMemory, description="Per-run agent working context"
+    )
     conversation: Optional[ConversationMemory] = Field(
         default=None, description="Persistent conversation store"
     )
+    runtime_memory: RuntimeMemory = Field(
+        default_factory=RuntimeMemory,
+        description="Keeps only request + final output of each run; not cleared after run",
+    )
+    # Runtime-level persistence helpers (used by AgentRuntime to write RuntimeMemory).
+    last_request: Optional[str] = Field(default=None)
+    final_output: Optional[str] = Field(default=None)
+    run_id: Optional[str] = Field(default=None)
     state: AgentState = Field(
         default=AgentState.IDLE, description="Current agent state"
     )
@@ -114,8 +125,8 @@ class BaseAgent(BaseModel, ABC):
         """Initialize agent with default settings if not provided."""
         if self.llm is None or not isinstance(self.llm, LLM):
             self.llm = LLM(config_name=self.name.lower())
-        if not isinstance(self.memory, ShortMemory):
-            self.memory = ShortMemory()
+        if not isinstance(self.short_memory, ShortMemory):
+            self.short_memory = ShortMemory()
         if self.conversation is None:
             self.conversation = ConversationMemory(
                 session_id=f"sess_{self.name}_{uuid.uuid4().hex[:8]}",
@@ -126,7 +137,7 @@ class BaseAgent(BaseModel, ABC):
 
     def append_message(self, message: Message, *, extra: Optional[Dict[str, Any]] = None) -> None:
         """Append message to memory and conversation storage."""
-        self.memory.add_message(message)
+        self.short_memory.add_message(message)
         if self.conversation is None:
             return
         persist_extra = {
@@ -220,11 +231,22 @@ class BaseAgent(BaseModel, ABC):
         if self.state != AgentState.IDLE:
             raise RuntimeError(f"Cannot run agent from state: {self.state}")
 
+        # Each run uses an independent short_memory context.
+        self.short_memory.clear()
+        self.last_request = request
+        self.final_output = None
+        # RuntimeMemory: record request immediately (not cleared after run).
+        try:
+            self.runtime_memory.add_request(request)
+        except Exception:
+            logger.exception("Failed to write runtime_memory request")
+
         if request:
             self.update_memory("user", request)
 
         results: List[str] = []
         run_id = f"run_{uuid.uuid4().hex[:12]}"
+        self.run_id = run_id
         self._emit_event(
             "agent_run_start",
             {
@@ -234,73 +256,89 @@ class BaseAgent(BaseModel, ABC):
                 "run_id": run_id,
             },
         )
-        async with self.state_context(AgentState.RUNNING):
-            while (
-                self.current_step < self.max_steps and self.state != AgentState.FINISHED
-            ):
-                self.current_step += 1
-                logger.info(f"Executing step {self.current_step}/{self.max_steps}")
-                self._emit_event(
-                    "agent_step_start",
-                    {
-                        "name": self.name,
-                        "current_step": self.current_step,
-                        "max_steps": self.max_steps,
-                    },
-                )
+        try:
+            async with self.state_context(AgentState.RUNNING):
+                while (
+                    self.current_step < self.max_steps and self.state != AgentState.FINISHED
+                ):
+                    self.current_step += 1
+                    logger.info(f"Executing step {self.current_step}/{self.max_steps}")
+                    self._emit_event(
+                        "agent_step_start",
+                        {
+                            "name": self.name,
+                            "current_step": self.current_step,
+                            "max_steps": self.max_steps,
+                        },
+                    )
 
-                # Memory hygiene before each step (before any potential LLM call in step()).
-                cleanup = getattr(self.memory, "cleanup_if_needed", None)
-                if callable(cleanup):
-                    try:
-                        await cleanup(llm=self.llm)
-                    except Exception as e:
-                        logger.warning(f"Memory cleanup failed: {e}")
+                    # Memory hygiene before each step (before any potential LLM call in step()).
+                    cleanup = getattr(self.short_memory, "cleanup_if_needed", None)
+                    if callable(cleanup):
+                        try:
+                            await cleanup(llm=self.llm)
+                        except Exception as e:
+                            logger.warning(f"Memory cleanup failed: {e}")
 
-                step_result = await self.step()
-                self._emit_event(
-                    "agent_step_end",
-                    {
-                        "name": self.name,
-                        "current_step": self.current_step,
-                        "max_steps": self.max_steps,
-                        "result_len": len(step_result or ""),
-                    },
-                )
+                    step_result = await self.step()
+                    self._emit_event(
+                        "agent_step_end",
+                        {
+                            "name": self.name,
+                            "current_step": self.current_step,
+                            "max_steps": self.max_steps,
+                            "result_len": len(step_result or ""),
+                        },
+                    )
 
-                # Check for stuck state
-                if self.is_stuck():
-                    self.handle_stuck_state()
+                    # Check for stuck state
+                    if self.is_stuck():
+                        self.handle_stuck_state()
 
-                results.append(f"Step {self.current_step}: {step_result}")
+                    results.append(f"Step {self.current_step}: {step_result}")
 
-            if self.current_step >= self.max_steps:
-                self.current_step = 0
-                self.state = AgentState.IDLE
-                results.append(f"Terminated: Reached max steps ({self.max_steps})")
-        output = "\n".join(results) if results else "No steps executed"
-        self._emit_event(
-            "agent_run_end",
-            {
-                "name": self.name,
-                "current_step": self.current_step,
-                "state": str(self.state),
-                "output_len": len(output),
-                "run_id": run_id,
-            },
-        )
+                if self.current_step >= self.max_steps:
+                    self.current_step = 0
+                    self.state = AgentState.IDLE
+                    results.append(
+                        f"Terminated: Reached max steps ({self.max_steps})"
+                    )
+            output = "\n".join(results) if results else "No steps executed"
+            self.final_output = output
 
-        if self.conversation is not None:
+            self._emit_event(
+                "agent_run_end",
+                {
+                    "name": self.name,
+                    "current_step": self.current_step,
+                    "state": str(self.state),
+                    "output_len": len(output),
+                    "run_id": run_id,
+                },
+            )
+
+            if self.conversation is not None:
+                try:
+                    await self.conversation.write_session_summary(
+                        run_id=run_id,
+                        status=str(self.state),
+                        llm=LLM(config_name="fast"),
+                        extra={"stream": False},
+                    )
+                except Exception:
+                    logger.exception("Failed to write session summary")
+            # RuntimeMemory: append final output after run completes.
             try:
-                await self.conversation.write_session_summary(
-                    run_id=run_id,
-                    status=str(self.state),
-                    llm=LLM(config_name="fast"),
-                    extra={"stream": False},
-                )
+                self.runtime_memory.add_final_output(self.final_output)
             except Exception:
-                logger.exception("Failed to write session summary")
-        return output
+                logger.exception("Failed to write runtime_memory final_output")
+            return output
+        finally:
+            # After run, clear the per-run context to keep runs independent.
+            try:
+                self.short_memory.clear()
+            except Exception:
+                logger.exception("Failed to clear short_memory after run")
 
     @abstractmethod
     async def step(self) -> str:
@@ -318,17 +356,17 @@ class BaseAgent(BaseModel, ABC):
 
     def is_stuck(self) -> bool:
         """Check if the agent is stuck in a loop by detecting duplicate content"""
-        if len(self.memory.messages) < 2:
+        if len(self.short_memory.messages) < 2:
             return False
 
-        last_message = self.memory.messages[-1]
+        last_message = self.short_memory.messages[-1]
         if not last_message.content:
             return False
 
         # Count identical content occurrences
         duplicate_count = sum(
             1
-            for msg in reversed(self.memory.messages[:-1])
+            for msg in reversed(self.short_memory.messages[:-1])
             if msg.role == "assistant" and msg.content == last_message.content
         )
 
@@ -337,9 +375,9 @@ class BaseAgent(BaseModel, ABC):
     @property
     def messages(self) -> List[Message]:
         """Retrieve a list of messages from the agent's memory."""
-        return self.memory.messages
+        return self.short_memory.messages
 
     @messages.setter
     def messages(self, value: List[Message]):
         """Set the list of messages in the agent's memory."""
-        self.memory.messages = value
+        self.short_memory.messages = value

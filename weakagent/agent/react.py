@@ -20,7 +20,7 @@ class ReActAgent(BaseAgent, ABC):
     next_step_prompt: Optional[str] = None
 
     llm: Optional[LLM] = Field(default_factory=LLM)
-    memory: ShortMemory = Field(default_factory=ShortMemory)
+    short_memory: ShortMemory = Field(default_factory=ShortMemory)
     state: AgentState = Field(default=AgentState.IDLE, description="Current agent state")
 
     max_steps: int = Field(default=10, description="Maximum steps before termination")

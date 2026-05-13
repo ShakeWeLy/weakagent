@@ -29,7 +29,7 @@ class ChatAgent(BaseAgent):
     system_prompt: str = CHAT_SYSTEM_PROMPT
     next_step_prompt: str = "You are a chat agent that can chat with the user."
     llm: LLM = LLM()
-    memory: ShortMemory = ShortMemory(
+    short_memory: ShortMemory = ShortMemory(
         cleanup_strategy=MemoryCleanupStrategy.TRUNCATE_TOOL_OUTPUT,
         truncate_tool_chars=1500,
         keep_last_n=50,
@@ -42,6 +42,11 @@ class ChatAgent(BaseAgent):
 
     async def step(self) -> str:
         """Execute a single step in the agent's workflow."""
-        content = await self.llm.ask(self.memory.messages, system_msgs=[Message.system_message(self.system_prompt)], temperature=0.0, verbose=True)
+        content = await self.llm.ask(
+            self.short_memory.messages,
+            system_msgs=[Message.system_message(self.system_prompt)],
+            temperature=0.0,
+            verbose=True,
+        )
         self.update_memory("assistant", content)
         return content
