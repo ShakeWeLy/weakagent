@@ -15,7 +15,7 @@ TOOL_CALL_REQUIRED = "Tool calls required but none provided"
 logger = get_logger(__name__)
 
 class BriefReActAgent(ToolCallAgent):
-    name: str = "reacttoolcall"
+    name: str = "react"
     description: str = "an agent that git a brieft think, selcet tools to execute tool calls using react."
 
     think_system_prompt: str = THINK_SYSTEM_PROMPT

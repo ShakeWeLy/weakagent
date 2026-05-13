@@ -19,7 +19,7 @@ You need to decide which sub-agent to run based on the task.
 Sub-agents:
 chat: a chat agent that can chat with the user.
 echo: an echo agent that can echo the user's message.
-reacttoolcall: an agent that git a brieft think, selcet tools to execute tool calls using react.
+react: an agent that git a brieft think, selcet tools to execute tool calls using react.
 
 You need to return the sub-agent id and the request to run the sub-agent, or the answer to the user directly.
 If you need to create a new sub-agent, you need to use the create_sub_agent tool.

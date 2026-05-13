@@ -31,7 +31,7 @@ class AgentFactory:
             "chat": AgentSpec(agent_cls=ChatAgent),
             "toolcall": AgentSpec(agent_cls=ToolCallAgent),
             "brief_react": AgentSpec(agent_cls=BriefReActAgent),
-            "reacttoolcall": AgentSpec(agent_cls=BriefReActAgent),
+            "react": AgentSpec(agent_cls=BriefReActAgent),
             "multi_react": AgentSpec(agent_cls=BriefReActMultiAgent),
         }
 
