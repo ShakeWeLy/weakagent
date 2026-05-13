@@ -241,18 +241,17 @@ class BaseAgent(BaseModel, ABC):
         # Each run uses an independent short_memory context.
         if not self.awaiting_human:
             self.short_memory.clear()
-
-        # Load runtime_memory history into this run's short_memory context.
-        if self.runtime_memory.messages:
-            self.short_memory.add_messages(list(self.runtime_memory.messages))
+            # Load runtime_memory history into this run's short_memory context.
+            if self.runtime_memory.messages:
+                self.short_memory.add_messages(list(self.runtime_memory.messages))
+        # If awaiting human, add request to memory and keep the lasted short_memory messages(no clear).
+        else:
+            self.update_memory("user", request)
 
         # New run begins; if we were previously paused, we are now resuming.
         self.awaiting_human = False
         self.last_request = request
         self.final_output = None
-
-        if request:
-            self.update_memory("user", request)
 
         results: List[str] = []
         run_id = f"run_{uuid.uuid4().hex[:12]}"

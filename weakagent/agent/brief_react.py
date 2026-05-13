@@ -68,18 +68,18 @@ class BriefReActAgent(ToolCallAgent):
                 return False
             raise
 
-        # select tool use 
+        # select tool use
         request_messages = list(self.messages)
         if self.act_next_step_prompt:
-            request_messages.append(Message.user_message(self.next_step_prompt))
+            request_messages.append(Message.user_message(self.act_next_step_prompt))
 
         try:
             # Get response with tool options
             response = await self.llm.ask_tool(
                 messages=request_messages,
                 system_msgs=(
-                    [Message.system_message(self.system_prompt)]
-                    if self.system_prompt
+                    [Message.system_message(self.act_system_prompt)]
+                    if self.act_system_prompt
                     else None
                 ),
                 tools=self.available_tools.to_params(),
