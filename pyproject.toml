@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weakagent"
-version = "0.2.1"
-description = "Introduce event-driven capabilities to weakagent."
+version = "0.2.3"
+description = "Introduce short memory and awaiting human feature to weakagent."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

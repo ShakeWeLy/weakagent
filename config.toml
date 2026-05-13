@@ -35,4 +35,8 @@ temperature = 0.0                          # Controls randomness for vision mode
 
 [scheduler]
 # SQLite path for TaskStore. Relative paths are resolved from project root (config.toml directory).
-db_path = "tasks.sqlite3"
+db_path = "weakagent.sqlite3"
+
+[conversation]
+# SQLite path for persisted agent conversation tables.
+db_path = "weakagent.sqlite3"
