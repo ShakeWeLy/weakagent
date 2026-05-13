@@ -2,6 +2,7 @@
 
 from .base import BaseMemory, MemoryCleanupStrategy, MemoryType
 from .conversation import ConversationMemory
+from .runtime_memory import RuntimeMemory
 from .short import ShortMemory
 
 __all__ = [
@@ -10,4 +11,5 @@ __all__ = [
     "MemoryType",
     "ShortMemory",
     "ConversationMemory",
+    "RuntimeMemory",
 ]

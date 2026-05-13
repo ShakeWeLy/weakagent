@@ -32,5 +32,6 @@ async def summarize_working_memory(llm: LLM, working_memory: List[Message]) -> M
             )
         ],
         system_msgs=[Message.system_message(WORKING_MEMORY_SUMMARY_SYSTEM_PROMPT)],
+        stream=False,
     )
     return Message.assistant_message(content)
