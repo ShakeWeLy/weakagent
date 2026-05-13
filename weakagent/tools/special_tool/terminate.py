@@ -57,9 +57,9 @@ class TerminateTool(BaseTool):
             ToolExecutionResult
         """
 
-        return ToolExecutionResult.success(
-            content=message,
-            metadata={
+        return ToolExecutionResult.ok(
+            output=message,
+            data={
                 "terminate": True,
                 "status": status,
                 "reason": reason,
