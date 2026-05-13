@@ -5,7 +5,7 @@ from weakagent.agent.brief_react import BriefReActAgent
 from weakagent.prompt.brief_react import ACT_NEXT_STEP_PROMPT
 from weakagent.utils.logger import get_logger
 from weakagent.schemas.tool import ToolCall
-from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate
+from weakagent.tools import ToolCollection, Terminate, AskHumanTool
 from weakagent.tools.sub_agent.create_sub_agent import CreateSubAgentTool
 from weakagent.tools.sub_agent.run_sub_agent import RunSubAgentTool
 
@@ -41,7 +41,7 @@ class BriefReActMultiAgent(BriefReActAgent):
     )
     # next_step_prompt: str = ACT_NEXT_STEP_PROMPT
     available_tools: ToolCollection = ToolCollection(
-        CreateSubAgentTool(), RunSubAgentTool(), Terminate()
+        CreateSubAgentTool(), RunSubAgentTool(), Terminate(), AskHumanTool()
     )
 
     # Using Any to avoid circular import with AgentRuntime

@@ -13,6 +13,7 @@ from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolCall, ToolChoice
 from weakagent.schemas.agent import AgentState
 from weakagent.schemas.message import Message
 from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate
+from weakagent.tools.special_tool.ask_human import AskHumanTool
 
 TOOL_CALL_REQUIRED = "Tool calls required but none provided"
 logger = get_logger(__name__)
@@ -28,10 +29,12 @@ class ToolCallAgent(ReActAgent):
     next_step_prompt: str = NEXT_STEP_PROMPT
 
     available_tools: ToolCollection = ToolCollection(
-        CreateChatCompletion(), Terminate()
+        CreateChatCompletion(), AskHumanTool(), Terminate()
     )
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
-    special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name])
+    special_tool_names: List[str] = Field(
+        default_factory=lambda: [AskHumanTool().name, Terminate().name]
+    )
 
     tool_calls: List[ToolCall] = Field(default_factory=list)
     _current_base64_image: Optional[str] = None
@@ -256,6 +259,13 @@ class ToolCallAgent(ReActAgent):
         """Handle special tool execution and state changes"""
         if not self._is_special_tool(name):
             return
+
+        # AskHuman pauses the run: do not treat current output as final.
+        try:
+            if getattr(result, "data", None) and result.data.get("await_human"):
+                setattr(self, "awaiting_human", True)
+        except Exception:
+            pass
 
         if self._should_finish_execution(name=name, result=result, **kwargs):
             # Set agent state to finished

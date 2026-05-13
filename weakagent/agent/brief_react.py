@@ -9,7 +9,7 @@ from weakagent.prompt.brief_react import THINK_NEXT_STEP_PROMPT, THINK_SYSTEM_PR
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolCall, ToolChoice
 from weakagent.schemas.agent import AgentState
 from weakagent.schemas.message import Message
-from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate
+from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate, AskHumanTool
 
 TOOL_CALL_REQUIRED = "Tool calls required but none provided"
 logger = get_logger(__name__)
@@ -24,10 +24,10 @@ class BriefReActAgent(ToolCallAgent):
     act_next_step_prompt: str = ACT_NEXT_STEP_PROMPT
 
     available_tools: ToolCollection = ToolCollection(
-        CreateChatCompletion(), Terminate()
+        CreateChatCompletion(), Terminate(), AskHumanTool()
     )
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
-    special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name])
+    special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name, AskHumanTool().name])
 
     tool_calls: List[ToolCall] = Field(default_factory=list)
     _current_base64_image: Optional[str] = None

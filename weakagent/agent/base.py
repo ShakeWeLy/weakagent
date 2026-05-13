@@ -52,6 +52,10 @@ class BaseAgent(BaseModel, ABC):
         default_factory=RuntimeMemory,
         description="Keeps only request + final output of each run; not cleared after run",
     )
+    awaiting_human: bool = Field(
+        default=False,
+        description="If true, this run is paused awaiting user input; do not persist final_output.",
+    )
     # Runtime-level persistence helpers (used by AgentRuntime to write RuntimeMemory).
     last_request: Optional[str] = Field(default=None)
     final_output: Optional[str] = Field(default=None)
@@ -231,22 +235,21 @@ class BaseAgent(BaseModel, ABC):
         if self.state != AgentState.IDLE:
             raise RuntimeError(f"Cannot run agent from state: {self.state}")
 
+        # RuntimeMemory: record request immediately (not cleared after run).
+        self.runtime_memory.add_request(request)
+
         # Each run uses an independent short_memory context.
-        self.short_memory.clear()
+        if not self.awaiting_human:
+            self.short_memory.clear()
+
+        # Load runtime_memory history into this run's short_memory context.
+        if self.runtime_memory.messages:
+            self.short_memory.add_messages(list(self.runtime_memory.messages))
+
+        # New run begins; if we were previously paused, we are now resuming.
+        self.awaiting_human = False
         self.last_request = request
         self.final_output = None
-        # Load runtime_memory history into this run's short_memory context.
-        # This lets the agent answer questions like "what did I just ask?" across runs.
-        try:
-            if self.runtime_memory.messages:
-                self.short_memory.add_messages(list(self.runtime_memory.messages))
-        except Exception:
-            logger.exception("Failed to load runtime_memory into short_memory")
-        # RuntimeMemory: record request immediately (not cleared after run).
-        try:
-            self.runtime_memory.add_request(request)
-        except Exception:
-            logger.exception("Failed to write runtime_memory request")
 
         if request:
             self.update_memory("user", request)
@@ -343,7 +346,8 @@ class BaseAgent(BaseModel, ABC):
         finally:
             # After run, clear the per-run context to keep runs independent.
             try:
-                self.short_memory.clear()
+                if not self.awaiting_human:
+                    self.short_memory.clear()
             except Exception:
                 logger.exception("Failed to clear short_memory after run")
 
