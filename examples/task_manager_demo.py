@@ -20,7 +20,7 @@ async def main() -> None:
     registry.register("weekly_report", WeeklyReportExecutor)
 
     # 2) Store: sqlite persistence (data only)
-    demo_db = Path(__file__).with_name("demo_tasks.sqlite3")
+    demo_db = Path(__file__).with_name("weakagent.sqlite3")
     store = TaskStore(db_path=demo_db)
 
     # 3) Dispatcher: route task -> executor -> execute

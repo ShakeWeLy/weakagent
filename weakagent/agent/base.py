@@ -224,12 +224,14 @@ class BaseAgent(BaseModel, ABC):
             self.update_memory("user", request)
 
         results: List[str] = []
+        run_id = f"run_{uuid.uuid4().hex[:12]}"
         self._emit_event(
             "agent_run_start",
             {
                 "name": self.name,
                 "max_steps": self.max_steps,
                 "request_len": len(request or ""),
+                "run_id": run_id,
             },
         )
         async with self.state_context(AgentState.RUNNING):
@@ -284,8 +286,20 @@ class BaseAgent(BaseModel, ABC):
                 "current_step": self.current_step,
                 "state": str(self.state),
                 "output_len": len(output),
+                "run_id": run_id,
             },
         )
+
+        if self.conversation is not None:
+            try:
+                await self.conversation.write_session_summary(
+                    run_id=run_id,
+                    status=str(self.state),
+                    llm=LLM(config_name="fast"),
+                    extra={"stream": False},
+                )
+            except Exception:
+                logger.exception("Failed to write session summary")
         return output
 
     @abstractmethod

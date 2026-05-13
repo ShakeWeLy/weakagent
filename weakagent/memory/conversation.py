@@ -6,11 +6,13 @@ import tomllib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import Field, model_validator
 
 from weakagent.config.settings import PROJECT_ROOT
+from weakagent.llm.llm import LLM
+from weakagent.llm.summarize import summarize_working_memory
 from weakagent.memory.base import BaseMemory, MemoryType
 from weakagent.schemas.message import Message
 from weakagent.utils.logger import get_logger
@@ -125,6 +127,27 @@ class ConversationMemory(BaseMemory):
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tool_call_message_id ON tool_call(message_id)"
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS session_summary (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    agent_type TEXT,
+                    status TEXT,
+                    summary TEXT,
+                    extra TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(session_id, run_id)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_session_summary_session_id ON session_summary(session_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_session_summary_created_at ON session_summary(created_at)"
+            )
             conn.commit()
 
     def ensure_session(self) -> None:
@@ -160,6 +183,85 @@ class ConversationMemory(BaseMemory):
             self._persist_message(message, extra=extra)
         except Exception:
             logger.exception("Failed to persist conversation message")
+
+    def list_session_messages(self, *, session_id: Optional[str] = None) -> List[Message]:
+        sid = session_id or self.session_id
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT role, content, extra
+                FROM conversation_message
+                WHERE session_id = ?
+                ORDER BY id ASC
+                """,
+                (sid,),
+            ).fetchall()
+
+        msgs: List[Message] = []
+        for r in rows:
+            role = str(r["role"])
+            content = r["content"]
+            name = None
+            tool_call_id = None
+            try:
+                extra = json.loads(r["extra"] or "{}")
+                name = extra.get("name")
+                tool_call_id = extra.get("tool_call_id")
+            except Exception:
+                pass
+            msgs.append(
+                Message(
+                    role=role,  # type: ignore[arg-type]
+                    content=content,
+                    name=name,
+                    tool_call_id=tool_call_id,
+                )
+            )
+        return msgs
+
+    async def write_session_summary(
+        self,
+        *,
+        run_id: str,
+        status: str,
+        llm: Optional[LLM] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Summarize current session and persist to `session_summary`."""
+        llm = llm or LLM(config_name="fast")
+        messages = self.list_session_messages()
+        summary_msg = await summarize_working_memory(llm, messages)
+        summary_text = summary_msg.content or ""
+
+        payload = extra or {}
+        payload.setdefault("model", getattr(llm, "model", None))
+        payload.setdefault("messages_count", len(messages))
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO session_summary(
+                    session_id, run_id, agent_type, status, summary, extra, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, run_id) DO UPDATE SET
+                    agent_type = excluded.agent_type,
+                    status = excluded.status,
+                    summary = excluded.summary,
+                    extra = excluded.extra
+                """,
+                (
+                    self.session_id,
+                    run_id,
+                    self.agent_type,
+                    status,
+                    summary_text,
+                    json.dumps(payload, ensure_ascii=False),
+                    _utc_now_iso(),
+                ),
+            )
+            conn.commit()
+
+        return summary_text
 
     def _persist_message(self, message: Message, extra: Optional[Dict[str, Any]] = None) -> None:
         message_id = f"msg_{uuid.uuid4().hex[:16]}"
