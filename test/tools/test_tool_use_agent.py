@@ -1,5 +1,5 @@
 from weakagent.agent.brief_react import BriefReActAgent
-from weakagent.tools.terminate import Terminate
+from weakagent.tools import Terminate
 from weakagent.tools.tool_collection import ToolCollection
 from weakagent.utils.verbose import verbose_result
 from weakagent.llm.llm import LLM

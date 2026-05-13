@@ -23,10 +23,10 @@ Return only one sentence.
 
 
 ACT_SYSTEM_PROMPT = """
-You are an action execution agent.
+You are an action execution agent in a ReAct-style.
 
 Your role:
-- Execute tools based on the reasoning output.
+- Execute tools based on the last assistant message which is the reasoning output.
 - You may call tools or terminate the process.
 
 Rules:

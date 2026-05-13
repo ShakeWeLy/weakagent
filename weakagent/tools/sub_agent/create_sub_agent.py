@@ -139,15 +139,13 @@ class CreateSubAgentTool(BaseTool):
     @staticmethod
     def _build_tool_collection(tool_names: List[str]):
         from weakagent.tools.create_chat_completion import CreateChatCompletion
-        from weakagent.tools.summary import Summary
-        from weakagent.tools.terminate import Terminate
+        from weakagent.tools import Terminate
         from weakagent.tools.tool_collection import ToolCollection
         from weakagent.tools.sub_agent.run_sub_agent import RunSubAgentTool
 
         builders = {
             "create_chat_completion": CreateChatCompletion,
             "terminate": Terminate,
-            "summary": Summary,
             "run_sub_agent": RunSubAgentTool,
             "create_sub_agent": CreateSubAgentTool,
         }

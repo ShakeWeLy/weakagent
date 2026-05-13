@@ -13,7 +13,7 @@ from weakagent.agent.toolcall import ToolCallAgent
 from weakagent.schemas.tool import Function, ToolCall
 from weakagent.llm.llm import LLM
 from weakagent.tools.base import BaseTool, ToolExecutionResult
-from weakagent.tools.terminate import Terminate
+from weakagent.tools import Terminate
 from weakagent.tools.tool_collection import ToolCollection
 from weakagent.utils.verbose import verbose_result
 

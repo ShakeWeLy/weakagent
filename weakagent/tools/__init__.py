@@ -3,8 +3,7 @@
 from .base import BaseTool, ToolExecutionResult
 from .tool_collection import ToolCollection
 from .create_chat_completion import CreateChatCompletion
-from .terminate import Terminate
-from .summary import Summary
+from .special_tool.terminate import TerminateTool as Terminate
 from .sub_agent import CreateSubAgentTool, RunSubAgentTool
 
 __all__ = [

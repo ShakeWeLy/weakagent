@@ -8,7 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from weakagent.agent.brief_react import BriefReActAgent
 from weakagent.llm.llm import LLM
 from weakagent.tools.base import BaseTool, ToolExecutionResult
-from weakagent.tools.terminate import Terminate
+from weakagent.tools import Terminate
 from weakagent.tools.tool_collection import ToolCollection
 from weakagent.utils.verbose import verbose_result
 
