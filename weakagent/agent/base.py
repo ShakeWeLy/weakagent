@@ -54,11 +54,11 @@ class BaseAgent(BaseModel, ABC):
     )
     awaiting_human: bool = Field(
         default=False,
-        description="If true, this run is paused awaiting user input; do not persist final_output.",
+        description="If true, this run is paused awaiting user input; do not persist last_result.",
     )
     # Runtime-level persistence helpers (used by AgentRuntime to write RuntimeMemory).
     last_request: Optional[str] = Field(default=None)
-    final_output: Optional[str] = Field(default=None)
+    last_result: Optional[str] = Field(default=None)
     run_id: Optional[str] = Field(default=None)
     state: AgentState = Field(
         default=AgentState.IDLE, description="Current agent state"
@@ -77,6 +77,8 @@ class BaseAgent(BaseModel, ABC):
         arbitrary_types_allowed=True,
         extra="allow",
     )
+    # Optional
+    only_last_result: bool = Field(default="", description="If only retutn last output result from agent")
 
     def _emit_event(self, event_type: str, data: Optional[dict] = None) -> None:
         """Emit an event to callbacks (sync/async; isolated failures).
@@ -251,7 +253,7 @@ class BaseAgent(BaseModel, ABC):
         # New run begins; if we were previously paused, we are now resuming.
         self.awaiting_human = False
         self.last_request = request
-        self.final_output = None
+        self.last_result = None
 
         results: List[str] = []
         run_id = f"run_{uuid.uuid4().hex[:12]}"
@@ -312,8 +314,8 @@ class BaseAgent(BaseModel, ABC):
                     results.append(
                         f"Terminated: Reached max steps ({self.max_steps})"
                     )
+            self.last_result = step_result if step_result else "No last result as output"
             output = "\n".join(results) if results else "No steps executed"
-            self.final_output = output
 
             self._emit_event(
                 "agent_run_end",
@@ -338,9 +340,12 @@ class BaseAgent(BaseModel, ABC):
                     logger.exception("Failed to write session summary")
             # RuntimeMemory: append final output after run completes.
             try:
-                self.runtime_memory.add_final_output(self.final_output)
+                self.runtime_memory.add_last_result(self.last_result)
             except Exception:
-                logger.exception("Failed to write runtime_memory final_output")
+                logger.exception("Failed to write runtime_memory last_result")
+            
+            if self.only_last_result:
+                return self.last_result
             return output
         finally:
             # After run, clear the per-run context to keep runs independent.

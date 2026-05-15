@@ -5,6 +5,7 @@ from .factory import AgentFactory, AgentSpec
 from .multi_react import BriefReActMultiAgent
 from .runtime import AgentRuntime
 from .toolcall import ToolCallAgent
+from .research_agent import ResearchAgent
 
 __all__ = [
     "BaseAgent",
@@ -14,4 +15,5 @@ __all__ = [
     "AgentFactory",
     "AgentSpec",
     "AgentRuntime",
+    "ResearchAgent",
 ]

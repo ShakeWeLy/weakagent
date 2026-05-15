@@ -23,3 +23,5 @@ class ResearchAgent(BriefReActAgent):
 
     max_steps: int = 30
     max_observe: Optional[Union[int, bool]] = None
+
+    only_last_result: bool = True

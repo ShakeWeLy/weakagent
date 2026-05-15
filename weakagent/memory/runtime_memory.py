@@ -25,7 +25,7 @@ class RuntimeMemory(BaseMemory):
         if request:
             self.add_message(Message.user_message(request))
 
-    def add_final_output(self, final_output: Optional[str]) -> None:
-        if final_output is not None:
-            self.add_message(Message.assistant_message(final_output))
+    def add_last_result(self, last_result: Optional[str]) -> None:
+        if last_result is not None:
+            self.add_message(Message.assistant_message(last_result))
 

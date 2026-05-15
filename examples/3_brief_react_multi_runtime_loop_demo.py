@@ -3,7 +3,7 @@ Interactive demo: AgentRuntime + BriefReActMultiAgent multi-turn loop.
 
 Goal:
 - Each `agent.run()` uses a fresh `short_memory` (cleared before/after run)
-- `runtime_memory` accumulates ONLY request + final_output per run (not cleared)
+- `runtime_memory` accumulates ONLY request + last_result per run (not cleared)
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ def _print_runtime_memory(agent) -> None:
     if msgs is None:
         print("runtime_memory: <missing>")
         return
-    print("\n--- runtime_memory (request + final_output history) ---")
+    print("\n--- runtime_memory (request + last_result history) ---")
     for i, m in enumerate(msgs.messages, start=1):
         content = (m.content or "").strip().replace("\n", "\\n")
         if len(content) > 160:
