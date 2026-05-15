@@ -1,7 +1,7 @@
 import threading
 import tomllib
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -69,10 +69,30 @@ class LLMSettings(BaseModel):
     )
 
 
+class SearchSettings(BaseModel):
+    """可选的网页搜索配置（`config.toml` 中 `[search]` 段）。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    engine: str = Field(
+        default="duckduckgo",
+        description="首选搜索引擎：google | baidu | duckduckgo | bing",
+    )
+    fallback_engines: List[str] = Field(
+        default_factory=lambda: ["bing", "google", "baidu"],
+        description="主引擎失败时依次尝试的后备引擎",
+    )
+    lang: str = Field(default="en", description="语言代码")
+    country: str = Field(default="us", description="国家/地区代码")
+    retry_delay: int = Field(default=60, ge=0, description="整轮引擎失败后重试间隔（秒）")
+    max_retries: int = Field(default=3, ge=0, description="整轮重试次数上限")
+
+
 class _AppConfig(BaseModel):
-    """仅承载多 profile 的 LLM 配置。"""
+    """应用级配置（LLM + 可选搜索等）。"""
 
     llm: Dict[str, LLMSettings]
+    search: SearchSettings = Field(default_factory=SearchSettings)
 
 
 class Config:
@@ -132,12 +152,22 @@ class Config:
             },
         }
 
-        self._config = _AppConfig(llm=llm_dict)
+        search_raw = raw_config.get("search") or {}
+        if not isinstance(search_raw, dict):
+            search_raw = {}
+        search_settings = SearchSettings(**search_raw)
+
+        self._config = _AppConfig(llm=llm_dict, search=search_settings)
 
     @property
     def llm(self) -> Dict[str, LLMSettings]:
         assert self._config is not None
         return self._config.llm
+
+    @property
+    def search_config(self) -> SearchSettings:
+        assert self._config is not None
+        return self._config.search
 
 
 config = Config()
