@@ -12,7 +12,7 @@ from weakagent.prompt.toolcall import NEXT_STEP_PROMPT, SYSTEM_PROMPT
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolCall, ToolChoice
 from weakagent.schemas.agent import AgentState
 from weakagent.schemas.message import Message
-from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate
+from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate, WebSearch
 from weakagent.tools.special_tool.ask_human import AskHumanTool
 
 TOOL_CALL_REQUIRED = "Tool calls required but none provided"
@@ -29,7 +29,7 @@ class ToolCallAgent(ReActAgent):
     next_step_prompt: str = NEXT_STEP_PROMPT
 
     available_tools: ToolCollection = ToolCollection(
-        CreateChatCompletion(), AskHumanTool(), Terminate()
+        CreateChatCompletion(), WebSearch(), AskHumanTool(), Terminate()
     )
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
     special_tool_names: List[str] = Field(
