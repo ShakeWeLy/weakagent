@@ -48,6 +48,19 @@ logger = get_logger(__name__)
 EventCallback = Callable[[dict], Union[Any, Awaitable[Any]]]
 
 
+def _extract_reasoning_content(obj: Any) -> Optional[str]:
+    """Read provider-specific thinking/reasoning text from a completion message or delta."""
+    if obj is None:
+        return None
+    rc = getattr(obj, "reasoning_content", None)
+    if rc is None:
+        extra = getattr(obj, "model_extra", None)
+        if isinstance(extra, dict):
+            rc = extra.get("reasoning_content")
+    if rc is None:
+        return None
+    return rc if isinstance(rc, str) else str(rc)
+
 
 class LLM:
     def __init__(
@@ -91,6 +104,13 @@ class LLM:
 
         self.token_counter = TokenCounter(self.tokenizer)
         self.on_event = on_event
+        # Set by ask / ask_tool / ask_tool_stream when the provider returns thinking content.
+        self._last_reasoning_content: Optional[str] = None
+
+    @property
+    def last_reasoning_content(self) -> Optional[str]:
+        """Reasoning/thinking text from the last completion, if any (OpenAI-compat extensions)."""
+        return self._last_reasoning_content
 
     def _emit_event(
         self,
@@ -261,7 +281,11 @@ class LLM:
                         )
                     del message["base64_image"]
 
-                if "content" in message or "tool_calls" in message:
+                if (
+                    "content" in message
+                    or "tool_calls" in message
+                    or message.get("reasoning_content")
+                ):
                     formatted_messages.append(message)
                 else:
                     # This is a common source of "why did the message disappear?"
@@ -322,6 +346,7 @@ class LLM:
         """
         try:
             supports_images = self.supports_images
+            self._last_reasoning_content = None
 
             # Format system and user messages with image support check
             if system_msgs:
@@ -358,7 +383,8 @@ class LLM:
                     **params, stream=False
                 )
 
-                if not response.choices or not response.choices[0].message.content:
+                msg = response.choices[0].message if response.choices else None
+                if not msg or not (msg.content or _extract_reasoning_content(msg)):
                     raise ValueError("Empty or invalid response from LLM")
 
                 # Update token counts
@@ -366,7 +392,8 @@ class LLM:
                     response.usage.prompt_tokens, response.usage.completion_tokens
                 )
 
-                return response.choices[0].message.content
+                self._last_reasoning_content = _extract_reasoning_content(msg)
+                return msg.content or ""
 
             # Streaming request, For streaming, update estimated token count before making the request
             self.update_token_count(input_tokens)
@@ -379,6 +406,7 @@ class LLM:
             collected_messages = []
             print("-"*20)
             completion_text = ""
+            reasoning_text = ""
 
             self._emit_event(
                 "llm_stream_start",
@@ -398,7 +426,14 @@ class LLM:
 
                 choice0 = chunk.choices[0]
                 delta = getattr(choice0, "delta", None)
-                chunk_message = getattr(delta, "content", None) or ""
+                if delta is not None:
+                    rchunk = _extract_reasoning_content(delta)
+                    if rchunk:
+                        reasoning_text += rchunk
+
+                chunk_message = (
+                    (getattr(delta, "content", None) or "") if delta is not None else ""
+                )
 
                 if not chunk_message:
                     continue
@@ -423,6 +458,8 @@ class LLM:
             if not full_response:
                 print("No print content from LLM")
                 raise ValueError("Empty response from streaming LLM")
+
+            self._last_reasoning_content = reasoning_text or None
 
             # estimate completion tokens for streaming response
             completion_tokens = self.count_tokens(completion_text)
@@ -520,6 +557,8 @@ class LLM:
                     "当前配置未开启 supports_images；请在 config.toml 的 llm 段中为该 profile 设置 supports_images = true。"
                 )
 
+            self._last_reasoning_content = None
+
             # Format messages with image support
             formatted_messages = self.format_messages(messages, supports_images=True)
 
@@ -592,11 +631,13 @@ class LLM:
             if not stream:
                 response = await self.client.chat.completions.create(**params)
 
-                if not response.choices or not response.choices[0].message.content:
+                msg = response.choices[0].message if response.choices else None
+                if not msg or not (msg.content or _extract_reasoning_content(msg)):
                     raise ValueError("Empty or invalid response from LLM")
 
                 self.update_token_count(response.usage.prompt_tokens)
-                return response.choices[0].message.content
+                self._last_reasoning_content = _extract_reasoning_content(msg)
+                return msg.content or ""
 
             # Handle streaming request
             self.update_token_count(input_tokens)
@@ -605,6 +646,7 @@ class LLM:
             print("-"*20)
             collected_messages = []
             completion_text = ""
+            reasoning_text = ""
 
             self._emit_event(
                 "llm_stream_start",
@@ -625,7 +667,14 @@ class LLM:
 
                 choice0 = chunk.choices[0]
                 delta = getattr(choice0, "delta", None)
-                chunk_message = getattr(delta, "content", None) or ""
+                if delta is not None:
+                    rchunk = _extract_reasoning_content(delta)
+                    if rchunk:
+                        reasoning_text += rchunk
+
+                chunk_message = (
+                    (getattr(delta, "content", None) or "") if delta is not None else ""
+                )
 
                 if not chunk_message:
                     continue
@@ -649,6 +698,8 @@ class LLM:
 
             if not full_response:
                 raise ValueError("Empty response from streaming LLM")
+
+            self._last_reasoning_content = reasoning_text or None
 
             completion_tokens = self.count_tokens(completion_text)
             self._emit_event(
@@ -727,6 +778,8 @@ class LLM:
             if tool_choice not in TOOL_CHOICE_VALUES:
                 raise ValueError(f"Invalid tool_choice: {tool_choice}")
 
+            self._last_reasoning_content = None
+
             # Check if the model supports images
             supports_images = self.supports_images
 
@@ -799,6 +852,10 @@ class LLM:
                 response.usage.prompt_tokens, response.usage.completion_tokens
             )
 
+            self._last_reasoning_content = _extract_reasoning_content(
+                response.choices[0].message
+            )
+
             return response.choices[0].message
 
         except TokenLimitExceeded:
@@ -867,6 +924,8 @@ class LLM:
             if tool_choice not in TOOL_CHOICE_VALUES:
                 raise ValueError(f"Invalid tool_choice: {tool_choice}")
 
+            self._last_reasoning_content = None
+
             supports_images = self.supports_images
             if system_msgs:
                 system_msgs = self.format_messages(system_msgs, supports_images)
@@ -920,6 +979,7 @@ class LLM:
             print("-" * 20)
             collected_messages: List[str] = []
             completion_text = ""
+            reasoning_text = ""
             tool_calls_buffer: dict[int, dict] = {}
 
             self._emit_event(
@@ -942,6 +1002,10 @@ class LLM:
                 delta = getattr(choice0, "delta", None)
                 if delta is None:
                     continue
+
+                rchunk = _extract_reasoning_content(delta)
+                if rchunk:
+                    reasoning_text += rchunk
 
                 chunk_message = getattr(delta, "content", None) or ""
                 if chunk_message:
@@ -1036,6 +1100,8 @@ class LLM:
 
             if not full_response and not tool_calls:
                 raise ValueError("Empty response from streaming tool LLM")
+
+            self._last_reasoning_content = reasoning_text or None
 
             # Estimate completion tokens for streaming response (text + tool arguments).
             completion_text = full_response + "".join(

@@ -79,7 +79,7 @@ class BaseAgent(BaseModel, ABC):
     )
     # Optional
     only_last_result: bool = Field(default="", description="If only retutn last output result from agent")
-
+    summarize_short_memory: bool = Field(default=False, description="If summarize the short memory before each step")
     def _emit_event(self, event_type: str, data: Optional[dict] = None) -> None:
         """Emit an event to callbacks (sync/async; isolated failures).
 
@@ -210,8 +210,12 @@ class BaseAgent(BaseModel, ABC):
             raise ValueError(f"Unsupported message role: {role}")
 
         # Create message with appropriate parameters based on role
-        kwargs = {"base64_image": base64_image, **(kwargs if role == "tool" else {})}
-        message = message_map[role](content, **kwargs)
+        call_kw: Dict[str, Any] = {"base64_image": base64_image}
+        if role == "tool":
+            call_kw.update(kwargs)
+        elif role == "assistant" and "reasoning_content" in kwargs:
+            call_kw["reasoning_content"] = kwargs["reasoning_content"]
+        message = message_map[role](content, **call_kw)
         self.append_message(message)
         self._emit_event(
             "agent_memory_add",
@@ -327,7 +331,7 @@ class BaseAgent(BaseModel, ABC):
                     "run_id": run_id,
                 },
             )
-
+            
             if self.conversation is not None:
                 try:
                     await self.conversation.write_session_summary(
@@ -344,6 +348,11 @@ class BaseAgent(BaseModel, ABC):
             except Exception:
                 logger.exception("Failed to write runtime_memory last_result")
             
+            # Select the last result from the short memory
+            if self.summarize_short_memory:
+                from weakagent.llm.summarize import summarize_short_memory
+                summary = await summarize_short_memory(self.llm, self.short_memory.messages)
+                return summary
             if self.only_last_result:
                 return self.last_result
             return output

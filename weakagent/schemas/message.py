@@ -23,6 +23,8 @@ class Message(BaseModel):
 
     role: ROLE_TYPE = Field(...)  # type: ignore
     content: Optional[str] = Field(default=None)
+    # OpenAI-compat "thinking" models (e.g. some Qwen endpoints) require this echoed on follow-ups.
+    reasoning_content: Optional[str] = Field(default=None)
     tool_calls: Optional[List[ToolCall]] = Field(default=None)
     name: Optional[str] = Field(default=None)
     tool_call_id: Optional[str] = Field(default=None)
@@ -53,6 +55,8 @@ class Message(BaseModel):
         message = {"role": self.role}
         if self.content is not None:
             message["content"] = self.content
+        if self.reasoning_content is not None:
+            message["reasoning_content"] = self.reasoning_content
         if self.tool_calls is not None:
             message["tool_calls"] = [tool_call.dict() for tool_call in self.tool_calls]
         if self.name is not None:
@@ -108,9 +112,19 @@ class Message(BaseModel):
         return cls(role=Role.SYSTEM, content=content)
 
     @classmethod
-    def assistant_message(cls, content: Optional[str] = None, base64_image: Optional[str] = None) -> "Message":
+    def assistant_message(
+        cls,
+        content: Optional[str] = None,
+        base64_image: Optional[str] = None,
+        reasoning_content: Optional[str] = None,
+    ) -> "Message":
         """Create an assistant message"""
-        return cls(role=Role.ASSISTANT, content=content, base64_image=base64_image)
+        return cls(
+            role=Role.ASSISTANT,
+            content=content,
+            base64_image=base64_image,
+            reasoning_content=reasoning_content,
+        )
 
     @classmethod
     def tool_message(cls, content: str, name, tool_call_id: str, base64_image: Optional[str] = None) -> "Message":

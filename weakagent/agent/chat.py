@@ -48,5 +48,9 @@ class ChatAgent(BaseAgent):
             temperature=0.0,
             verbose=True,
         )
-        self.update_memory("assistant", content)
+        self.update_memory(
+            "assistant",
+            content,
+            reasoning_content=self.llm.last_reasoning_content,
+        )
         return content

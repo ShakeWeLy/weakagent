@@ -6,6 +6,7 @@ from weakagent.agent.toolcall import ToolCallAgent
 from weakagent.utils.exceptions import TokenLimitExceeded
 from weakagent.utils.logger import get_logger
 from weakagent.prompt.brief_react import THINK_NEXT_STEP_PROMPT, THINK_SYSTEM_PROMPT, ACT_NEXT_STEP_PROMPT, ACT_SYSTEM_PROMPT
+from weakagent.llm.llm import _extract_reasoning_content
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolCall, ToolChoice
 from weakagent.schemas.agent import AgentState
 from weakagent.schemas.message import Message
@@ -49,7 +50,11 @@ class BriefReActAgent(ToolCallAgent):
                 temperature=0.0,
                 verbose=True,
             )
-            self.update_memory("assistant", content)
+            self.update_memory(
+                "assistant",
+                content,
+                reasoning_content=self.llm.last_reasoning_content,
+            )
             # self.act_next_step_prompt = content
         except ValueError:
             raise
@@ -107,6 +112,7 @@ class BriefReActAgent(ToolCallAgent):
             response.tool_calls if response and response.tool_calls else []
         )
         content = response.content if response and response.content else ""
+        reasoning = _extract_reasoning_content(response)
 
         # Log response info
         logger.info(f"✨ {self.name}'s thoughts: {content}")
@@ -130,15 +136,23 @@ class BriefReActAgent(ToolCallAgent):
                         f"🤔 Hmm, {self.name} tried to use tools when they weren't available!"
                     )
                 if content:
-                    self.update_memory("assistant", content)
+                    self.update_memory(
+                        "assistant",
+                        content,
+                        reasoning_content=reasoning,
+                    )
                     return True
                 return False
 
             # Create and add assistant message
             assistant_msg = (
-                Message.from_tool_calls(content=content, tool_calls=self.tool_calls)
+                Message.from_tool_calls(
+                    content=content,
+                    tool_calls=self.tool_calls,
+                    reasoning_content=reasoning,
+                )
                 if self.tool_calls
-                else Message.assistant_message(content)
+                else Message.assistant_message(content, reasoning_content=reasoning)
             )
             self.append_message(assistant_msg)
 
