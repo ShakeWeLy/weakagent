@@ -79,6 +79,7 @@ class LLM:
         self.base_url = llm_config.base_url
         self.supports_images = llm_config.supports_images
         self.use_max_completion_tokens = llm_config.use_max_completion_tokens
+        self.enable_think = llm_config.enable_think
         self.context_window = getattr(llm_config, "context_window", None)
         self.reserve_completion_tokens = getattr(
             llm_config, "reserve_completion_tokens", None
@@ -111,6 +112,15 @@ class LLM:
     def last_reasoning_content(self) -> Optional[str]:
         """Reasoning/thinking text from the last completion, if any (OpenAI-compat extensions)."""
         return self._last_reasoning_content
+
+    def _apply_enable_think_extra_body(self, params: dict) -> None:
+        """Merge provider-specific thinking toggle into ``extra_body`` (e.g. DeepSeek)."""
+        if self.enable_think == "default":
+            return
+        existing = params.get("extra_body")
+        merged = dict(existing) if isinstance(existing, dict) else {}
+        merged["thinking"] = {"type": self.enable_think}
+        params["extra_body"] = merged
 
     def _emit_event(
         self,
@@ -379,6 +389,7 @@ class LLM:
 
             if not stream:
                 # Non-streaming request
+                self._apply_enable_think_extra_body(params)
                 response = await self.client.chat.completions.create(
                     **params, stream=False
                 )
@@ -401,6 +412,7 @@ class LLM:
             if verbose:
                 logger.info(f"[VERBOSE] caller={get_real_caller()} model={self.model} messages={messages}")
             
+            self._apply_enable_think_extra_body(params)
             response = await self.client.chat.completions.create(**params, stream=True)
 
             collected_messages = []
@@ -629,6 +641,7 @@ class LLM:
 
             # Handle non-streaming request
             if not stream:
+                self._apply_enable_think_extra_body(params)
                 response = await self.client.chat.completions.create(**params)
 
                 msg = response.choices[0].message if response.choices else None
@@ -641,6 +654,7 @@ class LLM:
 
             # Handle streaming request
             self.update_token_count(input_tokens)
+            self._apply_enable_think_extra_body(params)
             response = await self.client.chat.completions.create(**params)
 
             print("-"*20)
@@ -835,6 +849,7 @@ class LLM:
                 )
 
             params["stream"] = False  # Always use non-streaming for tool requests
+            self._apply_enable_think_extra_body(params)
             response: ChatCompletion = await self.client.chat.completions.create(
                 **params
             )
@@ -974,6 +989,7 @@ class LLM:
                 )
 
             self.update_token_count(input_tokens)
+            self._apply_enable_think_extra_body(params)
             response = await self.client.chat.completions.create(**params)
 
             print("-" * 20)

@@ -1,9 +1,9 @@
 import threading
 import tomllib
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _resolve_config_toml() -> Path:
@@ -32,6 +32,8 @@ def get_project_root() -> Path:
 
 PROJECT_ROOT = get_project_root()
 
+EnableThink = Literal["default", "enabled", "disabled"]
+
 
 class LLMSettings(BaseModel):
     """OpenAI SDK（官方或 OpenAI 兼容 HTTP 端点）。"""
@@ -57,6 +59,31 @@ class LLMSettings(BaseModel):
         False,
         description="是否使用 max_completion_tokens（如 o1 等推理型接口），否则用 max_tokens",
     )
+    enable_think: EnableThink = Field(
+        "default",
+        description=(
+            '思考/推理模式开关（兼容 DeepSeek 等：经 extra_body 发送 '
+            '{"thinking":{"type":"enabled"|"disabled"}}）。'
+            '"default" - do not send extra_body.thinking (provider default, e.g. DeepSeek’s default).'
+            '"enabled" - sends extra_body={"thinking": {"type": "enabled"}}.'
+            '"disabled" - sends extra_body={"thinking": {"type": "disabled"}}.'
+        ),
+    )
+
+    @field_validator("enable_think", mode="before")
+    @classmethod
+    def _coerce_enable_think(cls, v: object) -> Union[EnableThink, object]:
+        if v is True:
+            return "enabled"
+        if v is False:
+            return "disabled"
+        if v is None:
+            return "default"
+        if isinstance(v, str):
+            s = v.strip().lower()
+            if s in ("default", "enabled", "disabled"):
+                return s  # type: ignore[return-value]
+        return v
 
     # Optional: token window management (prompt + completion must fit context_window)
     context_window: Optional[int] = Field(
@@ -140,6 +167,7 @@ class Config:
             "temperature": base_llm.get("temperature", 1.0),
             "supports_images": base_llm.get("supports_images", False),
             "use_max_completion_tokens": base_llm.get("use_max_completion_tokens", False),
+            "enable_think": base_llm.get("enable_think", "default"),
             "context_window": base_llm.get("context_window"),
             "reserve_completion_tokens": base_llm.get("reserve_completion_tokens"),
         }
