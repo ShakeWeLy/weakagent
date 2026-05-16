@@ -38,6 +38,7 @@ async def main() -> None:
         "multi_react",
         name="interactive_multi_react",
         max_steps=6,
+        summarize_short_memory=True,
     )
     agent = runtime.get(agent_id)
 
