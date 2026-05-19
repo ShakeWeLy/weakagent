@@ -15,7 +15,7 @@ class ListFilesTool(BaseTool):
                 "properties": {
                     "directory_path": {
                         "type": "string",
-                        "description": "The path to the directory to list, default is the current working directory (data directory: F:/_Work/ai-dashboard/data)"
+                        "description": "The path to the directory to list, default is the current working directory (data directory: F:/myproject/weakagent/weakagent)"
                     },
                     "recursive": {
                         "type": "boolean",

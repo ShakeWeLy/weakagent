@@ -8,7 +8,7 @@ from .sub_agent import CreateSubAgentTool, RunSubAgentTool
 from .special_tool.ask_human import AskHumanTool
 from .search import WebSearch, AgentResearchTool
 from .summary import Summary
-from .files import GrepTool, ListFilesTool
+from .files import GrepTool, ListFilesTool, PatchFileTool, WriteFileTool
 __all__ = [
     "BaseTool",
     "ToolExecutionResult",
@@ -23,4 +23,6 @@ __all__ = [
     "Summary",
     "GrepTool",
     "ListFilesTool",
+    "PatchFileTool",
+    "WriteFileTool",
 ]

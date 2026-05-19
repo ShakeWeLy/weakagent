@@ -18,7 +18,7 @@ class GrepTool(BaseTool):
                     },
                     "file_path": {
                         "type": "string",
-                        "description": "The path to the file or directory to search (data directory: F:/_Work/ai-dashboard/data)"
+                        "description": "The path to the file or directory to search (data directory: F:/myproject/weakagent/weakagent)"
                     },
                     "recursive": {
                         "type": "boolean",
