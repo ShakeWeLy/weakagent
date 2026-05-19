@@ -26,4 +26,4 @@ class AgentResearchTool(BaseTool):
             only_last_result=True,
             summarize_short_memory=True,
         )
-        return ToolExecutionResult.ok(output=research_agent.run(query))
+        return ToolExecutionResult.ok(output=await research_agent.run(query))
