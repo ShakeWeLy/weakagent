@@ -194,6 +194,21 @@ class AgentRuntime:
         agent = self.get(agent_id)
         return await agent.run(request=request)
 
+    async def run_loop(self, agent_id: str, request: Optional[str] = None):
+        """Run an agent loop synchronously (await until completion)."""
+        try:
+            while True:
+                request = input("You> ")
+                if not request:
+                    continue
+                if request.lower() in {"exit", "quit", "q"}:
+                    break
+                result = await self.run(agent_id, request=request)
+                print("\nAgent result:\n", result)
+        finally:
+            await self.cleanup(agent_id)
+            print("Cleanup complete.")
+    
     def run_in_background(
         self, agent_id: str, request: Optional[str] = None
     ) -> asyncio.Task:
