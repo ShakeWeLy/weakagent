@@ -5,10 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from weakagent.agent.base import BaseAgent
 from weakagent.agent.factory import AgentFactory
-from weakagent.utils.logger import get_logger
-
-logger = get_logger(__name__)
-
+from weakagent.utils.logger import logger
 
 @dataclass
 class ManagedAgent:
@@ -199,6 +196,7 @@ class AgentRuntime:
         try:
             while True:
                 request = input("You> ")
+                logger.info(f"User request: {request}")
                 if not request:
                     continue
                 if request.lower() in {"exit", "quit", "q"}:
@@ -231,9 +229,9 @@ class AgentRuntime:
         try:
             await meta.task
         except asyncio.CancelledError:
-            logger.info("Cancelled agent task: %s", agent_id)
+            logger.info(f"Cancelled agent task: {agent_id}")
         except Exception as exc:
-            logger.warning("Agent task ended with error after cancel: %s", exc)
+            logger.warning(f"Agent task ended with error after cancel: {exc}")
         return True
 
     async def cleanup(self, agent_id: str, *, recursive: bool = True) -> None:

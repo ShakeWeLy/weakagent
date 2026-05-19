@@ -76,3 +76,5 @@ def get_logger(name="weakagent"):
         logger.addHandler(file)
 
     return logger
+
+logger = get_logger(__name__)
