@@ -6,6 +6,7 @@ from .multi_react import BriefReActMultiAgent
 from .runtime import AgentRuntime
 from .toolcall import ToolCallAgent
 from .research_agent import ResearchAgent
+from .chat import ChatAgent
 
 __all__ = [
     "BaseAgent",
@@ -16,4 +17,5 @@ __all__ = [
     "AgentSpec",
     "AgentRuntime",
     "ResearchAgent",
+    "ChatAgent",
 ]

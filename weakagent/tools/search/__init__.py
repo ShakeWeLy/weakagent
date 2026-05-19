@@ -4,7 +4,7 @@ from weakagent.tools.search.bing_search import BingSearchEngine
 from weakagent.tools.search.duckduckgo_engine import DuckDuckGoSearchEngine
 from weakagent.tools.search.google_search import GoogleSearchEngine
 from weakagent.tools.search.search_tools import WebSearch
-
+from weakagent.tools.search.agent_research_tool import AgentResearchTool
 __all__ = [
     "SearchItem",
     "WebSearch",
@@ -13,4 +13,5 @@ __all__ = [
     "DuckDuckGoSearchEngine",
     "GoogleSearchEngine",
     "BingSearchEngine",
+    "AgentResearchTool",
 ]
