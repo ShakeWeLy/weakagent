@@ -1,5 +1,5 @@
 from typing import List, Optional, Union
-
+from enum import Enum
 from pydantic import Field
 
 from weakagent.agent.toolcall import ToolCallAgent
@@ -9,8 +9,15 @@ from weakagent.prompt.brief_react import THINK_NEXT_STEP_PROMPT, THINK_SYSTEM_PR
 from weakagent.llm.llm import _extract_reasoning_content
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolCall, ToolChoice
 from weakagent.schemas.agent import AgentState
-from weakagent.schemas.message import Message
+from weakagent.schemas.message import ROLE_TYPE, Message, Role
 from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate, AskHumanTool
+
+
+class BriefMessageProccess(str, Enum):
+    """Brief message proccess type: how to process the message in brief_react."""
+    USER = "user" # process the message as user message
+    ASSISTANT = "assistant" # process the message as assistant message
+    NONE = "none" # do not process the message, not add to memory
 
 TOOL_CALL_REQUIRED = "Tool calls required but none provided"
 logger = get_logger(__name__)
@@ -18,23 +25,18 @@ logger = get_logger(__name__)
 class BriefReActAgent(ToolCallAgent):
     name: str = "react"
     description: str = "an agent that git a brieft think, selcet tools to execute tool calls using react."
-
-    think_system_prompt: str = THINK_SYSTEM_PROMPT
-    think_next_step_prompt: str = THINK_NEXT_STEP_PROMPT
-    act_system_prompt: str = ACT_SYSTEM_PROMPT
-    act_next_step_prompt: str = ACT_NEXT_STEP_PROMPT
-
     available_tools: ToolCollection = ToolCollection(
         CreateChatCompletion(), Terminate(), AskHumanTool()
     )
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
     special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name, AskHumanTool().name])
-
-    tool_calls: List[ToolCall] = Field(default_factory=list)
-    _current_base64_image: Optional[str] = None
     
-    max_steps: int = 30
-    max_observe: Optional[Union[int, bool]] = None
+    think_system_prompt: str = THINK_SYSTEM_PROMPT
+    think_next_step_prompt: str = THINK_NEXT_STEP_PROMPT
+    act_system_prompt: str = ACT_SYSTEM_PROMPT
+    act_next_step_prompt: str = ACT_NEXT_STEP_PROMPT
+
+    brief_hink_message_proccess : BriefMessageProccess = Field(default=BriefMessageProccess.NONE)
 
     async def think(self) -> bool:
 
@@ -50,12 +52,17 @@ class BriefReActAgent(ToolCallAgent):
                 temperature=0.0,
                 verbose=True,
             )
-            self.update_memory(
-                "assistant",
-                content,
-                reasoning_content=self.llm.last_reasoning_content,
-            )
-            # self.act_next_step_prompt = content
+
+            if self.brief_hink_message_proccess == BriefMessageProccess.USER:
+                self.update_memory(Role.USER, content, reasoning_content=self.llm.last_reasoning_content)
+            elif self.brief_hink_message_proccess == BriefMessageProccess.ASSISTANT:
+                self.update_memory(Role.ASSISTANT, content, reasoning_content=self.llm.last_reasoning_content)
+            elif self.brief_hink_message_proccess == BriefMessageProccess.NONE:
+                pass
+            else:
+                raise ValueError(f"Invalid brief_hink_message_proccess: {self.brief_hink_message_proccess}")
+
+            self.act_next_step_prompt = content
         except ValueError:
             raise
         except Exception as e:
@@ -73,7 +80,7 @@ class BriefReActAgent(ToolCallAgent):
                 return False
             raise
 
-        # select tool use
+        # request_messages just use to llm ask, but will not add to memory
         request_messages = list(self.messages)
         if self.act_next_step_prompt:
             request_messages.append(Message.user_message(self.act_next_step_prompt))
