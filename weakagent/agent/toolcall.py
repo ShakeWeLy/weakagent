@@ -158,6 +158,8 @@ class ToolCallAgent(ReActAgent):
             self._current_base64_image = None
 
             result = await self.execute_tool(command)
+            _obs_prefix = f"Observed output of cmd `{command.function.name}` executed:\n"
+            self.last_result = result.removeprefix(_obs_prefix)
 
             if self.max_observe:
                 result = result[: self.max_observe]

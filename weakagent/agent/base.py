@@ -80,6 +80,7 @@ class BaseAgent(BaseModel, ABC):
     # Optional
     only_last_result: bool = Field(default="", description="If only retutn last output result from agent")
     summarize_short_memory: bool = Field(default=False, description="If summarize the short memory before each step")
+    verbose: bool = Field(default=False, description="If verbose the agent execution, llm input and output")
     def _emit_event(self, event_type: str, data: Optional[dict] = None) -> None:
         """Emit an event to callbacks (sync/async; isolated failures).
 
@@ -318,7 +319,7 @@ class BaseAgent(BaseModel, ABC):
                     results.append(
                         f"Terminated: Reached max steps ({self.max_steps})"
                     )
-            self.last_result = step_result if step_result else "No last result as output"
+            # self.last_result = step_result if step_result else "No last result as output"
             output = "\n".join(results) if results else "No steps executed"
 
             self._emit_event(

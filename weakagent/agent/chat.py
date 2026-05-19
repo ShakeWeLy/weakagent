@@ -46,7 +46,7 @@ class ChatAgent(BaseAgent):
             self.short_memory.messages,
             system_msgs=[Message.system_message(self.system_prompt)],
             temperature=0.0,
-            verbose=True,
+            verbose=self.verbose,
         )
         self.update_memory(
             "assistant",

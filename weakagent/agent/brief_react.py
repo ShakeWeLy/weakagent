@@ -50,9 +50,11 @@ class BriefReActAgent(ToolCallAgent):
                 messages=request_messages,
                 system_msgs=[Message.system_message(self.think_system_prompt)],
                 temperature=0.0,
-                verbose=True,
+                verbose=self.verbose,
             )
 
+            logger.info(f"Brief think content: {content}")
+            logger.info(f"Brief think reasoning content: {self.llm.last_reasoning_content}")
             if self.brief_hink_message_proccess == BriefMessageProccess.USER:
                 self.update_memory(Role.USER, content, reasoning_content=self.llm.last_reasoning_content)
             elif self.brief_hink_message_proccess == BriefMessageProccess.ASSISTANT:
@@ -96,7 +98,7 @@ class BriefReActAgent(ToolCallAgent):
                 ),
                 tools=self.available_tools.to_params(),
                 tool_choice=self.tool_choices,
-                verbose=True,
+                verbose=self.verbose,
             )
         except ValueError:
             raise
