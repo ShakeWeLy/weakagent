@@ -8,6 +8,7 @@ from weakagent.scheduler.task_manager import (
     TaskPriority,
     TaskStatus,
 )
+from weakagent.scheduler.runner import SchedulerRunner, run_scheduler_once
 
 __all__ = [
     "TaskPriority",
@@ -18,4 +19,6 @@ __all__ = [
     "TaskStore",
     "Scheduler",
     "Dispatcher",
+    "SchedulerRunner",
+    "run_scheduler_once",
 ]

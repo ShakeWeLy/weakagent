@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import time
@@ -135,6 +136,7 @@ class TaskStore:
         try:
             raw = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
         except Exception:
+            logger.exception("Failed to load config.toml")
             raw = {}
 
         configured = (raw.get("scheduler") or {}).get("db_path")
@@ -300,6 +302,18 @@ class TaskStore:
     def mark_failed(self, task_id: int, *, error: str) -> None:
         self._set_status(task_id, TaskStatus.FAILED, last_error=error, bump_attempts=False)
 
+    def delete_task(self, task_id: int) -> bool:
+        """Remove a task row permanently."""
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM tasks WHERE id = ?", (int(task_id),))
+            conn.commit()
+            return int(cur.rowcount) > 0
+
+    def cancel_task(self, task_id: int) -> Task:
+        """Mark a task as cancelled without deleting it."""
+        self._set_status(task_id, TaskStatus.CANCELLED, last_error=None, bump_attempts=False)
+        return self.get_task(task_id)
+
     def mark_pending(self, task_id: int, *, next_run_at: Optional[datetime] = None) -> None:
         now = _utc_now()
         with self._connect() as conn:
@@ -379,6 +393,14 @@ class Dispatcher:
         self.store.mark_running(task.id)
         try:
             await executor.execute(task, self.store)
+        except asyncio.CancelledError as exc:
+            logger.warning(
+                "Task execution cancelled. task_id=%s type=%s",
+                task.id,
+                task.task_type,
+            )
+            self.store.mark_failed(task.id, error=f"cancelled: {exc}")
+            return
         except Exception as exc:
             logger.exception("Task execution failed. task_id=%s type=%s", task.id, task.task_type)
             self.store.mark_failed(task.id, error=str(exc))
