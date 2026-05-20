@@ -139,6 +139,12 @@ class BaseAgent(BaseModel, ABC):
                 session_id=f"sess_{self.name}_{uuid.uuid4().hex[:8]}",
                 agent_type=self.name,
             )
+        if not self.runtime_memory.agent_type:
+            self.runtime_memory.agent_type = self.name
+        try:
+            self.runtime_memory.ensure_session()
+        except Exception:
+            logger.exception("Failed to ensure runtime session on agent init")
         return self
 
     def append_message(self, message: Message, *, extra: Optional[Dict[str, Any]] = None) -> None:

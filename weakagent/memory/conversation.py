@@ -34,6 +34,98 @@ def _to_dict(obj: Any) -> Dict[str, Any]:
     return {}
 
 
+def _tool_call_id(tc: Any) -> Optional[str]:
+    if isinstance(tc, dict):
+        raw = tc.get("id")
+        return str(raw) if raw is not None else None
+    raw = getattr(tc, "id", None)
+    return str(raw) if raw is not None else None
+
+
+def _split_system_prefix(msgs: List[Message]) -> tuple[List[Message], List[Message]]:
+    """Keep leading system messages separate from the rest."""
+    sys_prefix: List[Message] = []
+    rest: List[Message] = []
+    for m in msgs:
+        if not rest and m.role == "system":
+            sys_prefix.append(m)
+        else:
+            rest.append(m)
+    return sys_prefix, rest
+
+
+def _find_assistant_for_tool(messages: List[Message], tool_idx: int) -> Optional[int]:
+    """Return index of the assistant message that owns this tool result."""
+    tool_msg = messages[tool_idx]
+    tcid = tool_msg.tool_call_id
+    if not tcid:
+        return None
+    for j in range(tool_idx - 1, -1, -1):
+        prev = messages[j]
+        if prev.role == "assistant" and prev.tool_calls:
+            ids = {_tool_call_id(tc) for tc in prev.tool_calls}
+            ids.discard(None)
+            if tcid in ids:
+                return j
+        if prev.role == "user":
+            break
+    return None
+
+
+def _expand_start_for_tool_integrity(messages: List[Message], start: int) -> int:
+    """Walk backward so every tool message in the window has its assistant parent."""
+    start = max(0, start)
+    while True:
+        expanded = start
+        for i in range(start, len(messages)):
+            if messages[i].role != "tool":
+                continue
+            parent = _find_assistant_for_tool(messages, i)
+            if parent is not None and parent < expanded:
+                expanded = parent
+        if expanded == start:
+            return start
+        start = expanded
+
+
+def select_last_n_messages_with_integrity(messages: List[Message], n: int) -> List[Message]:
+    """Take the last n non-system messages while preserving tool-call chains."""
+    n = max(1, int(n))
+    sys_prefix, rest = _split_system_prefix(messages)
+    if not rest:
+        return list(sys_prefix)
+    if n >= len(rest):
+        return sys_prefix + rest
+    start = _expand_start_for_tool_integrity(rest, len(rest) - n)
+    return sys_prefix + rest[start:]
+
+
+def message_from_conversation_row(row: Any) -> Message:
+    """Rebuild a Message from a `conversation_message` row."""
+    role = str(row["role"])
+    content = row["content"]
+    try:
+        extra = json.loads(row["extra"] or "{}")
+    except Exception:
+        extra = {}
+
+    tool_calls_raw = extra.get("tool_calls")
+    if role == "assistant" and tool_calls_raw:
+        return Message.from_tool_calls(
+            tool_calls_raw,
+            content=content or "",
+            reasoning_content=extra.get("reasoning_content"),
+        )
+
+    return Message(
+        role=role,  # type: ignore[arg-type]
+        content=content,
+        name=extra.get("name"),
+        tool_call_id=extra.get("tool_call_id"),
+        reasoning_content=extra.get("reasoning_content"),
+    )
+
+
 class ConversationMemory(BaseMemory):
     """Persist conversation messages to sqlite tables."""
 
@@ -215,9 +307,34 @@ class ConversationMemory(BaseMemory):
         except Exception:
             logger.exception("Failed to persist conversation message")
 
-    def list_session_messages(self, *, session_id: Optional[str] = None) -> List[Message]:
-        sid = session_id or self.session_id
-        with self._connect() as conn:
+    @classmethod
+    def get_last_session_id(cls, db_path: Optional[str] = None) -> Optional[str]:
+        """Return the most recently updated session_id."""
+        path = str(cls._resolve_db_path(db_path or "conversation.sqlite3"))
+        with sqlite3.connect(path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT session_id
+                FROM conversation_session
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        return str(row["session_id"]) if row else None
+
+    @classmethod
+    def fetch_session_messages(
+        cls,
+        session_id: str,
+        *,
+        db_path: Optional[str] = None,
+        last_n: Optional[int] = None,
+    ) -> List[Message]:
+        """Load messages for a session; optionally keep last n with tool-chain integrity."""
+        path = str(cls._resolve_db_path(db_path or "conversation.sqlite3"))
+        with sqlite3.connect(path) as conn:
+            conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
                 SELECT role, content, extra
@@ -225,30 +342,17 @@ class ConversationMemory(BaseMemory):
                 WHERE session_id = ?
                 ORDER BY id ASC
                 """,
-                (sid,),
+                (session_id,),
             ).fetchall()
 
-        msgs: List[Message] = []
-        for r in rows:
-            role = str(r["role"])
-            content = r["content"]
-            name = None
-            tool_call_id = None
-            try:
-                extra = json.loads(r["extra"] or "{}")
-                name = extra.get("name")
-                tool_call_id = extra.get("tool_call_id")
-            except Exception:
-                pass
-            msgs.append(
-                Message(
-                    role=role,  # type: ignore[arg-type]
-                    content=content,
-                    name=name,
-                    tool_call_id=tool_call_id,
-                )
-            )
-        return msgs
+        messages = [message_from_conversation_row(r) for r in rows]
+        if last_n is not None:
+            messages = select_last_n_messages_with_integrity(messages, last_n)
+        return messages
+
+    def list_session_messages(self, *, session_id: Optional[str] = None) -> List[Message]:
+        sid = session_id or self.session_id
+        return self.fetch_session_messages(sid, db_path=self.db_path)
 
     async def write_session_summary(
         self,

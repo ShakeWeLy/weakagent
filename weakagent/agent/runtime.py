@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from weakagent.agent.base import BaseAgent
 from weakagent.agent.factory import AgentFactory
+from weakagent.llm.llm import LLM
 from weakagent.schemas.agent import AgentState
 from weakagent.utils.logger import logger
 
@@ -93,7 +94,67 @@ class AgentRuntime:
         if parent_id:
             self._agents[parent_id].children.add(resolved_id)
 
+        self._wire_runtime_session(agent, agent_id=resolved_id, agent_type=resolved_type)
         return resolved_id
+
+    def _wire_runtime_session(
+        self, agent: BaseAgent, *, agent_id: str, agent_type: str
+    ) -> None:
+        """Bind managed agent metadata to runtime_memory session rows."""
+        rm = getattr(agent, "runtime_memory", None)
+        if rm is None:
+            return
+        rm.agent_id = agent_id
+        rm.agent_type = rm.agent_type or agent_type
+        try:
+            rm.ensure_session()
+        except Exception:
+            logger.exception("Failed to ensure runtime session for agent_id=%s", agent_id)
+
+    async def _finalize_runtime_session(
+        self, agent_id: str, *, status: str = "closed"
+    ) -> Optional[str]:
+        """Summarize and persist runtime session when an interactive/queue loop ends."""
+        if agent_id not in self._agents:
+            logger.warning(
+                "Skip runtime session finalize: agent_id=%s not in registry", agent_id
+            )
+            return None
+        meta = self._agents[agent_id]
+        agent = meta.agent
+        rm = getattr(agent, "runtime_memory", None)
+        if rm is None:
+            return None
+        if not rm.messages:
+            logger.info("Skip runtime session finalize: no messages for agent_id=%s", agent_id)
+            return None
+
+        rm.agent_id = agent_id
+        rm.agent_type = rm.agent_type or meta.agent_type
+        try:
+            summary = await rm.finalize_session(
+                status=status,
+                run_id=f"loop_{agent_id}",
+                llm=LLM(config_name="fast"),
+                extra={
+                    "agent_id": agent_id,
+                    "agent_name": getattr(agent, "name", ""),
+                    "agent_type": meta.agent_type,
+                },
+            )
+            logger.info(
+                "Runtime session finalized session_id=%s agent_id=%s",
+                rm.session_id,
+                agent_id,
+            )
+            return summary
+        except Exception:
+            logger.exception(
+                "Failed to finalize runtime session agent_id=%s session_id=%s",
+                agent_id,
+                getattr(rm, "session_id", None),
+            )
+            return None
 
     def create_agent(
         self,
@@ -212,6 +273,7 @@ class AgentRuntime:
                 result = await self.run(agent_id, request=request)
                 print("\nAgent result:\n", result)
         finally:
+            await self._finalize_runtime_session(agent_id)
             await self.cleanup(agent_id)
             print("Cleanup complete.")
     
@@ -294,8 +356,12 @@ class AgentRuntime:
                     except asyncio.QueueEmpty:
                         request = None
         finally:
-            meta = self.get_meta(agent_id)
-            meta.queue_task = None
+            await self._finalize_runtime_session(agent_id)
+            try:
+                meta = self.get_meta(agent_id)
+                meta.queue_task = None
+            except KeyError:
+                pass
             logger.info("run_loop_async finished for agent_id=%s", agent_id)
 
     # ===============background mode=================
