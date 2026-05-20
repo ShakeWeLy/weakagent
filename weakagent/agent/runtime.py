@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from weakagent.agent.base import BaseAgent
 from weakagent.agent.factory import AgentFactory
+from weakagent.schemas.agent import AgentState
 from weakagent.utils.logger import logger
 
 @dataclass
@@ -17,6 +18,7 @@ class ManagedAgent:
     parent_id: Optional[str] = None
     children: set[str] = field(default_factory=set)
     task: Optional[asyncio.Task] = None
+    queue_task: Optional[asyncio.Task] = None
 
 
 class AgentRuntime:
@@ -36,6 +38,9 @@ class AgentRuntime:
         AgentRuntime._instance = self
         self.factory = factory or AgentFactory()
         self._agents: Dict[str, ManagedAgent] = {}
+        self.request_queue: asyncio.Queue[str] = asyncio.Queue()
+        self.result_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @classmethod
     async def instance(cls, factory: Optional[AgentFactory] = None) -> "AgentRuntime":
@@ -44,6 +49,7 @@ class AgentRuntime:
             async with cls._lock:
                 if cls._instance is None:
                     cls._instance = cls(factory)
+                    cls._instance._loop = asyncio.get_running_loop()
         return cls._instance
 
     @classmethod
@@ -186,11 +192,13 @@ class AgentRuntime:
             for agent_id, meta in self._agents.items()
         }
 
+    # ===============synchronous mode=================
     async def run(self, agent_id: str, request: Optional[str] = None) -> str:
         """Run an agent synchronously (await until completion)."""
         agent = self.get(agent_id)
         return await agent.run(request=request)
 
+    # ===============interactive mode=================
     async def run_loop(self, agent_id: str, request: Optional[str] = None):
         """Run an agent loop synchronously (await until completion)."""
         try:
@@ -207,6 +215,90 @@ class AgentRuntime:
             await self.cleanup(agent_id)
             print("Cleanup complete.")
     
+    # ===============queue mode=================
+    # Producer: put_request() at any time (main thread, scheduler thread, stdin, HTTP, ...).
+    # Consumer: start_queue_loop() runs a long-lived task that takes one request at a time,
+    # runs agent.run() (LLM / tools), pushes the result, then immediately takes the next
+    # queued request if the queue is not empty.
+
+    def put_request(self, request: str) -> None:
+        """Enqueue one request (thread-safe). Ignores blank strings."""
+        text = (request or "").strip()
+        if not text:
+            return
+        loop = self._loop
+        if loop is None:
+            self.request_queue.put_nowait(text)
+            return
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            self.request_queue.put_nowait(text)
+        else:
+            asyncio.run_coroutine_threadsafe(self.request_queue.put(text), loop)
+
+    async def get_result(self) -> str:
+        """Await the next result (FIFO, one per processed request)."""
+        return await self.result_queue.get()
+
+    def start_queue_loop(self, agent_id: str) -> asyncio.Task:
+        """Start the queue consumer in the background if not already running."""
+        meta = self.get_meta(agent_id)
+        if meta.queue_task and not meta.queue_task.done():
+            return meta.queue_task
+        meta.queue_task = asyncio.create_task(
+            self.run_loop_async(agent_id),
+            name=f"queue-loop-{agent_id}",
+        )
+        logger.info("Queue loop started for agent_id=%s", agent_id)
+        return meta.queue_task
+
+    async def stop_queue_loop(self, agent_id: str) -> None:
+        """Stop the queue consumer by enqueueing exit and awaiting its task."""
+        meta = self.get_meta(agent_id)
+        if not meta.queue_task or meta.queue_task.done():
+            return
+        self.put_request("exit")
+        try:
+            await meta.queue_task
+        except asyncio.CancelledError:
+            pass
+        meta.queue_task = None
+
+    def is_queue_loop_running(self, agent_id: str) -> bool:
+        meta = self.get_meta(agent_id)
+        return meta.queue_task is not None and not meta.queue_task.done()
+
+    async def _process_one_request(self, agent_id: str, request: str) -> str:
+        """Run a single queued request and return the agent output."""
+        meta = self.get_meta(agent_id)
+        meta.agent.current_step = 0
+        meta.agent.state = AgentState.IDLE
+        return await self.run(agent_id, request=request)
+
+    async def run_loop_async(self, agent_id: str) -> None:
+        """Consume request_queue: one request -> one run -> one result; drain backlog."""
+        try:
+            while True:
+                request = await self.request_queue.get()
+                while request is not None:
+                    if request.lower() in {"exit", "quit", "q"}:
+                        return
+                    logger.info("Queue processing request (len=%s)", len(request))
+                    result = await self._process_one_request(agent_id, request)
+                    await self.result_queue.put(result)
+                    try:
+                        request = self.request_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        request = None
+        finally:
+            meta = self.get_meta(agent_id)
+            meta.queue_task = None
+            logger.info("run_loop_async finished for agent_id=%s", agent_id)
+
+    # ===============background mode=================
     def run_in_background(
         self, agent_id: str, request: Optional[str] = None
     ) -> asyncio.Task:
@@ -234,6 +326,7 @@ class AgentRuntime:
             logger.warning(f"Agent task ended with error after cancel: {exc}")
         return True
 
+
     async def cleanup(self, agent_id: str, *, recursive: bool = True) -> None:
         """Cancel tasks, cleanup resources, and remove agent from registry."""
         meta = self.get_meta(agent_id)
@@ -244,6 +337,13 @@ class AgentRuntime:
                 await self.cleanup(child_id, recursive=True)
 
         await self.cancel(agent_id)
+        if meta.queue_task and not meta.queue_task.done():
+            meta.queue_task.cancel()
+            try:
+                await meta.queue_task
+            except asyncio.CancelledError:
+                pass
+            meta.queue_task = None
 
         cleanup = getattr(meta.agent, "cleanup", None)
         if callable(cleanup):
