@@ -78,8 +78,8 @@ class BaseAgent(BaseModel, ABC):
         extra="allow",
     )
     # Optional
-    only_last_result: bool = Field(default="", description="If only retutn last output result from agent")
-    summarize_short_memory: bool = Field(default=False, description="If summarize the short memory before each step")
+    only_last_result: bool = Field(default="", description="If only return last output result from agent")
+    summarize_short_memory: bool = Field(default=False, description="If return the summarize of the short memory")
     verbose: bool = Field(default=False, description="If verbose the agent execution, llm input and output")
     def _emit_event(self, event_type: str, data: Optional[dict] = None) -> None:
         """Emit an event to callbacks (sync/async; isolated failures).
@@ -342,7 +342,7 @@ class BaseAgent(BaseModel, ABC):
             
             if self.conversation is not None:
                 try:
-                    await self.conversation.write_session_summary(
+                    summarize_short_memory = await self.conversation.write_session_summary(
                         run_id=run_id,
                         status=str(self.state),
                         llm=LLM(config_name="fast"),
@@ -358,12 +358,16 @@ class BaseAgent(BaseModel, ABC):
             
             # Select the last result from the short memory
             if self.summarize_short_memory:
-                from weakagent.llm.summarize import summarize_short_memory
-                summary = await summarize_short_memory(self.llm, self.short_memory.messages)
-                return summary
+                if summarize_short_memory:
+                    return summarize_short_memory
+                else:
+                    from weakagent.llm.summarize import summarize_short_memory
+                    summary = await summarize_short_memory(self.llm, self.short_memory.messages)
+                    return summary
             if self.only_last_result:
                 return self.last_result
             return output
+        
         finally:
             # After run, clear the per-run context to keep runs independent.
             try:
