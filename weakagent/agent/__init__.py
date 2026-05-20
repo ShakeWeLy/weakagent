@@ -7,6 +7,7 @@ from .runtime import AgentRuntime
 from .toolcall import ToolCallAgent
 from .research_agent import ResearchAgent
 from .chat import ChatAgent
+from .task_crud import TaskCrudAgent
 
 __all__ = [
     "BaseAgent",
@@ -18,4 +19,5 @@ __all__ = [
     "AgentRuntime",
     "ResearchAgent",
     "ChatAgent",
+    "TaskCrudAgent",
 ]
