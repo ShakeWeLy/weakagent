@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weakagent"
-version = "0.2.3"
-description = "Introduce short memory and awaiting human feature to weakagent."
+version = "0.2.5"
+description = "Introduce scheduler and runtime session store to weakagent."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "openai>=2.32.0",
     "pillow>=12.2.0",

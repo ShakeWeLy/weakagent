@@ -28,6 +28,10 @@ db_path = "weakagent.sqlite3"
 # SQLite path for persisted agent conversation tables.
 db_path = "weakagent.sqlite3"
 
+[runtime_session]
+# SQLite path for runtime session tables (request + last_result history).
+db_path = "weakagent.sqlite3"
+
 # Web search (web_search tool). Optional; defaults are sensible for DuckDuckGo-first.
 [search]
 # Search engine for agent to use. Default is "Google", can be set to "Baidu" or "DuckDuckGo" or "Bing".
