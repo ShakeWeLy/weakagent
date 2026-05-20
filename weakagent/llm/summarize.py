@@ -83,6 +83,33 @@ Return ONLY the structured summary in Markdown format.
 No extra explanation or commentary.
 """
 
+SESSION_TITLE_SYSTEM_PROMPT = """
+You generate a short conversation session title from the user's first message.
+
+Rules:
+- Return ONLY the title text (no quotes, no prefix like "Title:").
+- At most 30 characters; prefer concise phrasing in the user's language.
+- Capture the main topic or intent, not a full sentence.
+"""
+
+SESSION_TITLE_USER_PROMPT = """
+User's first message:
+{request}
+
+Session title:
+"""
+
+
+async def generate_session_title(llm: LLM, request: str) -> str:
+    """Generate a short session title from the user's first request."""
+    content = await llm.ask(
+        [Message.user_message(SESSION_TITLE_USER_PROMPT.format(request=request))],
+        system_msgs=[Message.system_message(SESSION_TITLE_SYSTEM_PROMPT)],
+        stream=False,
+    )
+    return (content or "").strip()
+
+
 async def summarize_short_memory(llm: LLM, short_memory: List[Message]) -> str:
     """Summarize the short memory"""
     content = await llm.ask(

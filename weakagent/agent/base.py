@@ -138,7 +138,6 @@ class BaseAgent(BaseModel, ABC):
             self.conversation = ConversationMemory(
                 session_id=f"sess_{self.name}_{uuid.uuid4().hex[:8]}",
                 agent_type=self.name,
-                title=self.description or self.name,
             )
         return self
 
@@ -259,6 +258,14 @@ class BaseAgent(BaseModel, ABC):
         self.awaiting_human = False
         self.last_request = request
         self.last_result = None
+
+        if self.conversation is not None and request:
+            try:
+                await self.conversation.generate_title_from_request(
+                    request, llm=LLM(config_name="fast")
+                )
+            except Exception:
+                logger.exception("Failed to generate conversation session title")
 
         results: List[str] = []
         run_id = f"run_{uuid.uuid4().hex[:12]}"

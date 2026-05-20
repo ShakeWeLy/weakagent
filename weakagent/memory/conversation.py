@@ -12,7 +12,7 @@ from pydantic import Field, model_validator
 
 from weakagent.config.settings import PROJECT_ROOT
 from weakagent.llm.llm import LLM
-from weakagent.llm.summarize import summarize_working_memory
+from weakagent.llm.summarize import generate_session_title, summarize_working_memory
 from weakagent.memory.base import BaseMemory, MemoryType
 from weakagent.schemas.message import Message
 from weakagent.utils.logger import get_logger
@@ -151,6 +151,7 @@ class ConversationMemory(BaseMemory):
             conn.commit()
 
     def ensure_session(self) -> None:
+        """Ensure the session: create if not exists, update if exists."""
         with self._connect() as conn:
             conn.execute(
                 """
@@ -175,6 +176,36 @@ class ConversationMemory(BaseMemory):
                 ),
             )
             conn.commit()
+
+    async def generate_title_from_request(
+        self,
+        request: str,
+        *,
+        llm: Optional[LLM] = None,
+    ) -> Optional[str]:
+        """Set session title from the first user request via LLM.
+
+        Skips if the request is empty or the session already has persisted messages.
+        """
+        text = (request or "").strip()
+        if not text:
+            return self.title
+        if self.list_session_messages():
+            return self.title
+
+        llm = llm or LLM(config_name="fast")
+        try:
+            title = await generate_session_title(llm, text)
+        except Exception:
+            logger.exception("LLM session title generation failed")
+            title = ""
+
+        if not title:
+            title = text[:50] + ("..." if len(text) > 50 else "")
+
+        self.title = title.strip()[:200]
+        self.ensure_session()
+        return self.title
 
     def add_message(self, message: Message, extra: Optional[Dict[str, Any]] = None) -> None:
         super().add_message(message)
