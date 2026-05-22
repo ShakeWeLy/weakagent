@@ -148,9 +148,16 @@ class ToolCallAgent(ReActAgent):
         if not self.tool_calls:
             if self.tool_choices == ToolChoice.REQUIRED:
                 raise ValueError(TOOL_CALL_REQUIRED)
-
-            # Return last message content if no tool calls
-            return self.messages[-1].content or "No content or commands to execute"
+            # Return last message content and change agent state to finished
+            if self.messages[-1].content:
+                self.update_memory(
+                    "assistant",
+                    self.messages[-1].content,
+                )
+                self.agent_state = AgentState.FINISHED
+                return self.messages[-1].content
+            else:
+                return "No content or commands to execute"
 
         results = []
         for command in self.tool_calls:
