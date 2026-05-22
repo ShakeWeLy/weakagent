@@ -8,7 +8,8 @@ from weakagent.agent.factory import AgentFactory
 from weakagent.llm.llm import LLM
 from weakagent.schemas.agent import AgentState
 from weakagent.utils.logger import logger
-
+from weakagent.adapters.input import BaseInputSource, CLIInput
+from weakagent.adapters.output import BaseOutputSource, CLIOutput
 @dataclass
 class ManagedAgent:
     """Runtime metadata for a managed agent."""
@@ -164,7 +165,7 @@ class AgentRuntime:
         parent_id: Optional[str] = None,
         **kwargs: Any,
     ) -> str:
-        """Create and register an agent via AgentFactory."""
+        """Get an registered agent from factory and register it in runtime."""
         agent = self.factory.create(agent_type, **kwargs)
         return self.register(
             agent,
@@ -254,34 +255,84 @@ class AgentRuntime:
         }
 
     # ===============synchronous mode=================
-    async def run(self, agent_id: str, request: Optional[str] = None) -> str:
+    async def run(
+        self,
+        agent_id: str,
+        request: Optional[str] = None,
+        *,
+        input_source: Optional[BaseInputSource] = None,
+        output_source: Optional[BaseOutputSource] = None,
+        emit_output: bool = True,
+    ) -> str:
         """Run an agent synchronously (await until completion)."""
+        inp = input_source or CLIInput()
+        out = output_source or CLIOutput()
         agent = self.get(agent_id)
-        return await agent.run(request=request)
+        if request:
+            logger.info(f"User request: {request}")
+        else:
+            request = await inp.read()
+            logger.info(f"User request: {request}")
+        if not (request or "").strip():
+            return ""
+        result = await agent.run(request=request)
+        if emit_output and result:
+            out.dispatch(result)
+        return result
 
     # ===============interactive mode=================
-    async def run_loop(self, agent_id: str, request: Optional[str] = None):
-        """Run an agent loop synchronously (await until completion)."""
+    async def run_loop(
+        self,
+        agent_id: str,
+        request: Optional[str] = None,
+        *,
+        input_source: Optional[BaseInputSource] = None,
+        output_source: Optional[BaseOutputSource] = None,
+    ):
+        """Interactive loop: read via input_source until exit/quit/q."""
+        inp = input_source or CLIInput()
+        out = output_source or CLIOutput()
+        pending: Optional[str] = request
         try:
             while True:
-                request = input("You> ")
-                logger.info(f"User request: {request}")
-                if not request:
+                if pending is not None:
+                    current = pending
+                    pending = None
+                else:
+                    current = await inp.read()
+                logger.info(f"User request: {current}")
+
+                if not (current or "").strip():
                     continue
-                if request.lower() in {"exit", "quit", "q"}:
+                if current.lower() in {"exit", "quit", "q"}:
                     break
-                result = await self.run(agent_id, request=request)
-                print("\nAgent result:\n", result)
+                await self.run(
+                    agent_id,
+                    request=current,
+                    input_source=inp,
+                    output_source=out,
+                )
         finally:
             await self._finalize_runtime_session(agent_id)
             await self.cleanup(agent_id)
-            print("Cleanup complete.")
+            logger.info("Cleanup complete.")
     
     # ===============queue mode=================
     # Producer: put_request() at any time (main thread, scheduler thread, stdin, HTTP, ...).
     # Consumer: start_queue_loop() runs a long-lived task that takes one request at a time,
     # runs agent.run() (LLM / tools), pushes the result, then immediately takes the next
     # queued request if the queue is not empty.
+    def run_queue_loop(self, agent_id: str) -> asyncio.Task:
+        """Start the queue consumer in the background if not already running."""
+        meta = self.get_meta(agent_id)
+        if meta.queue_task and not meta.queue_task.done():
+            return meta.queue_task
+        meta.queue_task = asyncio.create_task(
+            self.run_loop_async(agent_id),
+            name=f"queue-loop-{agent_id}",
+        )
+        logger.info("Queue loop started for agent_id=%s", agent_id)
+        return meta.queue_task
 
     def put_request(self, request: str) -> None:
         """Enqueue one request (thread-safe). Ignores blank strings."""
@@ -316,7 +367,7 @@ class AgentRuntime:
         )
         logger.info("Queue loop started for agent_id=%s", agent_id)
         return meta.queue_task
-
+    
     async def stop_queue_loop(self, agent_id: str) -> None:
         """Stop the queue consumer by enqueueing exit and awaiting its task."""
         meta = self.get_meta(agent_id)
