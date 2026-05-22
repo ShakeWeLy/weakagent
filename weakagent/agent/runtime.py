@@ -269,10 +269,10 @@ class AgentRuntime:
         out = output_source or CLIOutput()
         agent = self.get(agent_id)
         if request:
-            logger.info(f"User request: {request}")
+            logger.debug(f"User request: {request}")
         else:
             request = await inp.read()
-            logger.info(f"User request: {request}")
+            logger.debug(f"User request: {request}")
         if not (request or "").strip():
             return ""
         result = await agent.run(request=request)
@@ -280,6 +280,47 @@ class AgentRuntime:
             out.dispatch(result)
         return result
 
+    # ===============background mode=================
+    def run_in_background(
+        self,
+        agent_id: str,
+        request: Optional[str] = None,
+        *,
+        input_source: Optional[BaseInputSource] = None,
+        output_source: Optional[BaseOutputSource] = None,
+        emit_output: bool = False,
+    ) -> asyncio.Task[str]:
+        """Schedule ``run()`` on the event loop and return its Task.
+
+        Prefer passing ``request`` explicitly. If omitted, ``run()`` falls back to
+        ``input_source`` (default CLI) inside the background task — rarely desirable
+        for CLI; use ``APIInput`` or a pre-filled request instead.
+        """
+        meta = self.get_meta(agent_id)
+        if meta.task and not meta.task.done():
+            raise RuntimeError(f"agent already running: {agent_id}")
+
+        async def _runner() -> str:
+            return await self.run(
+                agent_id,
+                request=request,
+                input_source=input_source,
+                output_source=output_source,
+                emit_output=emit_output,
+            )
+
+        task: asyncio.Task[str] = asyncio.create_task(
+            _runner(), name=f"bg-run-{agent_id}"
+        )
+        meta.task = task
+
+        def _clear_task_ref(t: asyncio.Task[str]) -> None:
+            if meta.task is t:
+                meta.task = None
+
+        task.add_done_callback(_clear_task_ref)
+        return task
+    
     # ===============interactive mode=================
     async def run_loop(
         self,
@@ -300,7 +341,7 @@ class AgentRuntime:
                     pending = None
                 else:
                     current = await inp.read()
-                logger.info(f"User request: {current}")
+                logger.debug(f"User request: {current}")
 
                 if not (current or "").strip():
                     continue
@@ -415,18 +456,6 @@ class AgentRuntime:
                 pass
             logger.info("run_loop_async finished for agent_id=%s", agent_id)
 
-    # ===============background mode=================
-    def run_in_background(
-        self, agent_id: str, request: Optional[str] = None
-    ) -> asyncio.Task:
-        """Run an agent in background and return the task."""
-        meta = self.get_meta(agent_id)
-        if meta.task and not meta.task.done():
-            raise RuntimeError(f"agent already running: {agent_id}")
-
-        task = asyncio.create_task(meta.agent.run(request=request))
-        meta.task = task
-        return task
 
     async def cancel(self, agent_id: str) -> bool:
         """Cancel background task of an agent if running."""
@@ -441,6 +470,8 @@ class AgentRuntime:
             logger.info(f"Cancelled agent task: {agent_id}")
         except Exception as exc:
             logger.warning(f"Agent task ended with error after cancel: {exc}")
+        finally:
+            meta.task = None
         return True
 
 
