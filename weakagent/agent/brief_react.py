@@ -92,7 +92,7 @@ class BriefReActAgent(ToolCallAgent):
             response = await self.llm.ask_tool(
                 messages=request_messages,
                 system_msgs=(
-                    [Message.system_message(self.act_system_prompt)]
+                    [Message.system_message(self.with_skills_prompt(self.act_system_prompt))]
                     if self.act_system_prompt
                     else None
                 ),

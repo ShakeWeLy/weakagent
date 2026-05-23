@@ -55,7 +55,7 @@ class ToolCallAgent(ReActAgent):
             response = await self.llm.ask_tool(
                 messages=request_messages,
                 system_msgs=(
-                    [Message.system_message(self.system_prompt)]
+                    [Message.system_message(self.with_skills_prompt(self.system_prompt))]
                     if self.system_prompt
                     else None
                 ),

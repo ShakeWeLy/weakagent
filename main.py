@@ -8,7 +8,7 @@ from weakagent.agent import ToolCallAgent, BriefReActAgent
 from weakagent.tools import ToolCollection, Terminate, AskHumanTool
 from weakagent.tools.search import AgentResearchTool
 from weakagent.tools import CreateSubAgentTool, RunSubAgentTool
-from weakagent.tools.files import GrepTool, ListFilesTool, PatchFileTool, WriteFileTool
+from weakagent.tools.files import GrepTool, ListFilesTool, PatchFileTool, ReadFileTool, WriteFileTool
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolChoice
 
 
@@ -28,6 +28,7 @@ class ChatToolcallAgent(BriefReActAgent):
         RunSubAgentTool(),
         GrepTool(),
         ListFilesTool(),
+        ReadFileTool(),
         PatchFileTool(),
         WriteFileTool(),
     )

@@ -81,6 +81,37 @@ class BaseAgent(BaseModel, ABC):
     only_last_result: bool = Field(default="", description="If only return last output result from agent")
     summarize_short_memory: bool = Field(default=False, description="If return the summarize of the short memory")
     verbose: bool = Field(default=False, description="If verbose the agent execution, llm input and output")
+    skills_enabled: bool = Field(
+        default=True, description="Inject <available_skills> into system prompts"
+    )
+    skill_filter: Optional[List[str]] = Field(
+        default=None, description="Optional allow-list of skill names"
+    )
+
+    def get_skill_manager(self):
+        """Lazy-init SkillManager (not a pydantic field to avoid deep copy issues)."""
+        mgr = getattr(self, "_skill_manager", None)
+        if mgr is None:
+            from weakagent.skills.manager import SkillManager
+
+            mgr = SkillManager()
+            object.__setattr__(self, "_skill_manager", mgr)
+        return mgr
+
+    def with_skills_prompt(self, base_prompt: Optional[str]) -> Optional[str]:
+        """Append skills usage instructions and `<available_skills>` to a system prompt."""
+        if not base_prompt or not self.skills_enabled:
+            return base_prompt
+
+        mgr = self.get_skill_manager()
+        block = mgr.build_skills_prompt(skill_filter=self.skill_filter)
+        if not block.strip():
+            return base_prompt
+
+        from weakagent.skills.prompt import SKILLS_USAGE_PROMPT
+
+        return f"{base_prompt.rstrip()}\n\n{SKILLS_USAGE_PROMPT.strip()}\n{block}"
+
     def _emit_event(self, event_type: str, data: Optional[dict] = None) -> None:
         """Emit an event to callbacks (sync/async; isolated failures).
 
