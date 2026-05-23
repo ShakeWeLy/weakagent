@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weakagent"
-version = "0.2.6"
-description = "Introduce long-term memory and skills to weakagent."
+version = "0.2.7"
+description = "Introduce mcp to weakagent."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
