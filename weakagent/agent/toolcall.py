@@ -150,12 +150,17 @@ class ToolCallAgent(ReActAgent):
                 raise ValueError(TOOL_CALL_REQUIRED)
             # Return last message content and change agent state to finished
             if self.messages[-1].content:
+                final_content = self.messages[-1].content
                 self.update_memory(
                     "assistant",
-                    self.messages[-1].content,
+                    final_content,
                 )
-                self.agent_state = AgentState.FINISHED
-                return self.messages[-1].content
+                self.last_result = final_content
+                self.state = AgentState.FINISHED
+                logger.info(
+                    "🏁 Agent completed the task (no tool calls, final response in content)."
+                )
+                return final_content
             else:
                 return "No content or commands to execute"
 
@@ -316,9 +321,14 @@ class ToolCallAgent(ReActAgent):
                     )
         logger.info(f"✨ Cleanup complete for agent '{self.name}'.")
 
-    async def run(self, request: Optional[str] = None) -> str:
+    async def run(
+        self,
+        request: Optional[str] = None,
+        *,
+        use_long_memory: bool = False,
+    ) -> str:
         """Run the agent with cleanup when done."""
         try:
-            return await super().run(request)
+            return await super().run(request, use_long_memory=use_long_memory)
         finally:
             await self.cleanup()
