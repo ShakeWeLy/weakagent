@@ -13,6 +13,7 @@ from weakagent.utils.logger import get_logger
 from weakagent.schemas.message import ROLE_TYPE, Message
 from weakagent.memory.conversation import ConversationMemory
 from weakagent.memory.short import ShortMemory
+from weakagent.memory.long import LongMemory
 from weakagent.memory.runtime_memory import RuntimeMemory
 from weakagent.schemas.agent import AgentState
 
@@ -51,6 +52,18 @@ class BaseAgent(BaseModel, ABC):
     runtime_memory: RuntimeMemory = Field(
         default_factory=RuntimeMemory,
         description="Keeps only request + final output of each run; not cleared after run",
+    )
+    long_memory: str = Field(
+        default="",
+        description="Formatted long-term memory text for prompt injection",
+    )
+    runtime_long_memory: LongMemory = Field(
+        default_factory=LongMemory,
+        description="Persistent long-term memory store (entries are LongMemoryEntry)",
+    )
+    long_memory_user_id: Optional[str] = Field(
+        default=None,
+        description="User id for loading/saving runtime_long_memory entries",
     )
     awaiting_human: bool = Field(
         default=False,
@@ -176,7 +189,33 @@ class BaseAgent(BaseModel, ABC):
             self.runtime_memory.ensure_session()
         except Exception:
             logger.exception("Failed to ensure runtime session on agent init")
+        if not isinstance(self.runtime_long_memory, LongMemory):
+            self.runtime_long_memory = LongMemory()
+        uid = self.long_memory_user_id or self.runtime_memory.user_id
+        if uid:
+            self.runtime_long_memory.user_id = uid
+            try:
+                self.runtime_long_memory.load_for_user(uid)
+                self.long_memory = self.runtime_long_memory.to_system_context()
+            except Exception:
+                logger.exception("Failed to load long memory for user_id=%s", uid)
         return self
+
+    def refresh_long_memory(self) -> str:
+        """Reload ``runtime_long_memory`` entries and refresh ``long_memory`` text."""
+        uid = self.long_memory_user_id or self.runtime_memory.user_id
+        if uid:
+            self.runtime_long_memory.user_id = uid
+            self.runtime_long_memory.load_for_user(uid)
+        self.long_memory = self.runtime_long_memory.to_system_context()
+        return self.long_memory
+
+    def _apply_long_memory_to_short(self) -> None:
+        """Inject ``long_memory`` as a system message into short_memory."""
+        context = self.refresh_long_memory()
+        if not context:
+            return
+        self.short_memory.add_message(Message.system_message(context))
 
     def append_message(self, message: Message, *, extra: Optional[Dict[str, Any]] = None) -> None:
         """Append message to memory and conversation storage."""
@@ -263,11 +302,17 @@ class BaseAgent(BaseModel, ABC):
             },
         )
 
-    async def run(self, request: Optional[str] = None) -> str:
+    async def run(
+        self,
+        request: Optional[str] = None,
+        *,
+        use_long_memory: bool = False,
+    ) -> str:
         """Execute the agent's main loop asynchronously.
 
         Args:
             request: Optional initial user request to process.
+            use_long_memory: If True, inject stored long_memory into short_memory.
 
         Returns:
             A string summarizing the execution results.
@@ -284,6 +329,8 @@ class BaseAgent(BaseModel, ABC):
         # Each run uses an independent short_memory context.
         if not self.awaiting_human:
             self.short_memory.clear()
+            if use_long_memory:
+                self._apply_long_memory_to_short()
             # Load runtime_memory history into this run's short_memory context.
             if self.runtime_memory.messages:
                 self.short_memory.add_messages(list(self.runtime_memory.messages))

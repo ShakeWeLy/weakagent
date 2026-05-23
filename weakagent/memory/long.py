@@ -13,6 +13,7 @@ from weakagent.config.settings import PROJECT_ROOT
 from weakagent.llm.llm import LLM
 from weakagent.llm.summarize import extract_long_memory
 from weakagent.memory.base import BaseMemory, MemoryType
+from weakagent.memory.runtime_memory import RuntimeMemory
 from weakagent.schemas.message import Message
 from weakagent.utils.logger import get_logger
 
@@ -208,6 +209,18 @@ class LongMemory(BaseMemory):
                 source_message=(user_message or "").strip()[:2000] or None,
             )
         return result
+
+    async def extract_and_save_from_runtime_memory(
+        self,
+        runtime_memory: RuntimeMemory,
+        *,
+        llm: Optional[LLM] = None,
+    ) -> dict:
+        """Extract long-term memory from a runtime_memory transcript and persist."""
+        text = runtime_memory.format_for_long_memory_extraction()
+        if not text or text == "[]":
+            return {"should_save": False}
+        return await self.extract_and_save(text, llm=llm)
 
     def to_system_context(self, *, max_items: int = 20) -> str:
         """Format stored memories for injection into the system prompt."""

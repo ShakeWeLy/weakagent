@@ -207,18 +207,42 @@ class RuntimeSessionStore(BaseMemory):
             conn.commit()
 
     @classmethod
-    def get_last_session_id(cls, db_path: Optional[str] = None) -> Optional[str]:
+    def get_last_session_id(
+        cls,
+        db_path: Optional[str] = None,
+        *,
+        agent_id: Optional[str] = None,
+        agent_type: Optional[str] = None,
+        user_id: Optional[str] = None,
+        exclude_session_id: Optional[str] = None,
+        require_messages: bool = False,
+    ) -> Optional[str]:
         path = str(cls._resolve_db_path(db_path or "weakagent.sqlite3"))
+        query = "SELECT session_id FROM runtime_session WHERE 1=1"
+        params: List[Any] = []
+        if agent_id is not None:
+            query += " AND agent_id = ?"
+            params.append(agent_id)
+        if agent_type is not None:
+            query += " AND agent_type = ?"
+            params.append(agent_type)
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        if exclude_session_id:
+            query += " AND session_id != ?"
+            params.append(exclude_session_id)
+        if require_messages:
+            query += (
+                " AND EXISTS ("
+                "SELECT 1 FROM runtime_session_message m "
+                "WHERE m.session_id = runtime_session.session_id"
+                ")"
+            )
+        query += " ORDER BY updated_at DESC, id DESC LIMIT 1"
         with sqlite3.connect(path) as conn:
             conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                """
-                SELECT session_id
-                FROM runtime_session
-                ORDER BY updated_at DESC, id DESC
-                LIMIT 1
-                """
-            ).fetchone()
+            row = conn.execute(query, params).fetchone()
         return str(row["session_id"]) if row else None
 
     @classmethod

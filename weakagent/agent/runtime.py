@@ -98,6 +98,34 @@ class AgentRuntime:
         self._wire_runtime_session(agent, agent_id=resolved_id, agent_type=resolved_type)
         return resolved_id
 
+    def _load_last_runtime_session(
+        self,
+        agent_id: str,
+        *,
+        load_last_session: bool,
+        last_session_messages: int = 10,
+    ) -> None:
+        """Hydrate agent runtime_memory from the previous session's raw messages."""
+        if not load_last_session:
+            return
+        agent = self.get(agent_id)
+        rm = getattr(agent, "runtime_memory", None)
+        if rm is None:
+            return
+        if rm.messages:
+            logger.debug(
+                "Skip load_last_session: runtime_memory already has %s message(s)",
+                len(rm.messages),
+            )
+            return
+        rm.agent_id = agent_id
+        try:
+            rm.load_last_runtime_session(last_n=last_session_messages)
+        except Exception:
+            logger.exception(
+                "Failed to load last runtime session for agent_id=%s", agent_id
+            )
+
     def _wire_runtime_session(
         self, agent: BaseAgent, *, agent_id: str, agent_type: str
     ) -> None:
@@ -107,10 +135,55 @@ class AgentRuntime:
             return
         rm.agent_id = agent_id
         rm.agent_type = rm.agent_type or agent_type
+        uid = getattr(rm, "user_id", None)
+        if uid and getattr(agent, "long_memory_user_id", None) is None:
+            agent.long_memory_user_id = uid
+        if uid:
+            agent.runtime_long_memory.user_id = uid
         try:
             rm.ensure_session()
         except Exception:
             logger.exception("Failed to ensure runtime session for agent_id=%s", agent_id)
+
+    async def _finalize_long_memory(
+        self, agent_id: str, *, use_long_memory: bool = False
+    ) -> Optional[dict]:
+        """Extract and persist long-term memory from runtime_memory on loop exit."""
+        if not use_long_memory:
+            return None
+        if agent_id not in self._agents:
+            return None
+        agent = self._agents[agent_id].agent
+        rm = getattr(agent, "runtime_memory", None)
+        if rm is None or not rm.messages:
+            logger.info(
+                "Skip long memory finalize: no runtime_memory messages agent_id=%s",
+                agent_id,
+            )
+            return None
+        uid = getattr(agent, "long_memory_user_id", None) or getattr(rm, "user_id", None)
+        if uid:
+            agent.runtime_long_memory.user_id = uid
+        try:
+            result = await agent.runtime_long_memory.extract_and_save_from_runtime_memory(
+                rm,
+                llm=LLM(config_name="fast"),
+            )
+            agent.long_memory = agent.runtime_long_memory.to_system_context()
+            if result.get("should_save"):
+                logger.info(
+                    "Long memory saved for agent_id=%s type=%s",
+                    agent_id,
+                    result.get("memory_type"),
+                )
+            else:
+                logger.info("Long memory extraction skipped for agent_id=%s", agent_id)
+            return result
+        except Exception:
+            logger.exception(
+                "Failed to finalize long memory for agent_id=%s", agent_id
+            )
+            return None
 
     async def _finalize_runtime_session(
         self, agent_id: str, *, status: str = "closed"
@@ -263,8 +336,16 @@ class AgentRuntime:
         input_source: Optional[BaseInputSource] = None,
         output_source: Optional[BaseOutputSource] = None,
         emit_output: bool = True,
+        load_last_session: bool = False,
+        last_session_messages: int = 10,
+        use_long_memory: bool = False,
     ) -> str:
         """Run an agent synchronously (await until completion)."""
+        self._load_last_runtime_session(
+            agent_id,
+            load_last_session=load_last_session,
+            last_session_messages=last_session_messages,
+        )
         inp = input_source or CLIInput()
         out = output_source or CLIOutput()
         agent = self.get(agent_id)
@@ -275,7 +356,7 @@ class AgentRuntime:
             logger.debug(f"User request: {request}")
         if not (request or "").strip():
             return ""
-        result = await agent.run(request=request)
+        result = await agent.run(request=request, use_long_memory=use_long_memory)
         if emit_output and result:
             out.dispatch(result)
         return result
@@ -289,6 +370,9 @@ class AgentRuntime:
         input_source: Optional[BaseInputSource] = None,
         output_source: Optional[BaseOutputSource] = None,
         emit_output: bool = False,
+        load_last_session: bool = False,
+        last_session_messages: int = 10,
+        use_long_memory: bool = False,
     ) -> asyncio.Task[str]:
         """Schedule ``run()`` on the event loop and return its Task.
 
@@ -307,6 +391,9 @@ class AgentRuntime:
                 input_source=input_source,
                 output_source=output_source,
                 emit_output=emit_output,
+                load_last_session=load_last_session,
+                last_session_messages=last_session_messages,
+                use_long_memory=use_long_memory,
             )
 
         task: asyncio.Task[str] = asyncio.create_task(
@@ -329,8 +416,16 @@ class AgentRuntime:
         *,
         input_source: Optional[BaseInputSource] = None,
         output_source: Optional[BaseOutputSource] = None,
+        load_last_session: bool = True,
+        last_session_messages: int = 10,
+        use_long_memory: bool = False,
     ):
         """Interactive loop: read via input_source until exit/quit/q."""
+        self._load_last_runtime_session(
+            agent_id,
+            load_last_session=load_last_session,
+            last_session_messages=last_session_messages,
+        )
         inp = input_source or CLIInput()
         out = output_source or CLIOutput()
         pending: Optional[str] = request
@@ -352,9 +447,11 @@ class AgentRuntime:
                     request=current,
                     input_source=inp,
                     output_source=out,
+                    use_long_memory=use_long_memory,
                 )
         finally:
             await self._finalize_runtime_session(agent_id)
+            await self._finalize_long_memory(agent_id, use_long_memory=use_long_memory)
             await self.cleanup(agent_id)
             logger.info("Cleanup complete.")
     
@@ -363,13 +460,25 @@ class AgentRuntime:
     # Consumer: start_queue_loop() runs a long-lived task that takes one request at a time,
     # runs agent.run() (LLM / tools), pushes the result, then immediately takes the next
     # queued request if the queue is not empty.
-    def run_queue_loop(self, agent_id: str) -> asyncio.Task:
+    def run_queue_loop(
+        self,
+        agent_id: str,
+        *,
+        load_last_session: bool = False,
+        last_session_messages: int = 10,
+        use_long_memory: bool = False,
+    ) -> asyncio.Task:
         """Start the queue consumer in the background if not already running."""
         meta = self.get_meta(agent_id)
         if meta.queue_task and not meta.queue_task.done():
             return meta.queue_task
         meta.queue_task = asyncio.create_task(
-            self.run_loop_async(agent_id),
+            self.run_loop_async(
+                agent_id,
+                load_last_session=load_last_session,
+                last_session_messages=last_session_messages,
+                use_long_memory=use_long_memory,
+            ),
             name=f"queue-loop-{agent_id}",
         )
         logger.info("Queue loop started for agent_id=%s", agent_id)
@@ -397,17 +506,21 @@ class AgentRuntime:
         """Await the next result (FIFO, one per processed request)."""
         return await self.result_queue.get()
 
-    def start_queue_loop(self, agent_id: str) -> asyncio.Task:
+    def start_queue_loop(
+        self,
+        agent_id: str,
+        *,
+        load_last_session: bool = False,
+        last_session_messages: int = 10,
+        use_long_memory: bool = False,
+    ) -> asyncio.Task:
         """Start the queue consumer in the background if not already running."""
-        meta = self.get_meta(agent_id)
-        if meta.queue_task and not meta.queue_task.done():
-            return meta.queue_task
-        meta.queue_task = asyncio.create_task(
-            self.run_loop_async(agent_id),
-            name=f"queue-loop-{agent_id}",
+        return self.run_queue_loop(
+            agent_id,
+            load_last_session=load_last_session,
+            last_session_messages=last_session_messages,
+            use_long_memory=use_long_memory,
         )
-        logger.info("Queue loop started for agent_id=%s", agent_id)
-        return meta.queue_task
     
     async def stop_queue_loop(self, agent_id: str) -> None:
         """Stop the queue consumer by enqueueing exit and awaiting its task."""
@@ -425,15 +538,37 @@ class AgentRuntime:
         meta = self.get_meta(agent_id)
         return meta.queue_task is not None and not meta.queue_task.done()
 
-    async def _process_one_request(self, agent_id: str, request: str) -> str:
+    async def _process_one_request(
+        self,
+        agent_id: str,
+        request: str,
+        *,
+        use_long_memory: bool = False,
+    ) -> str:
         """Run a single queued request and return the agent output."""
         meta = self.get_meta(agent_id)
         meta.agent.current_step = 0
         meta.agent.state = AgentState.IDLE
-        return await self.run(agent_id, request=request)
+        return await self.run(
+            agent_id,
+            request=request,
+            use_long_memory=use_long_memory,
+        )
 
-    async def run_loop_async(self, agent_id: str) -> None:
+    async def run_loop_async(
+        self,
+        agent_id: str,
+        *,
+        load_last_session: bool = False,
+        last_session_messages: int = 10,
+        use_long_memory: bool = False,
+    ) -> None:
         """Consume request_queue: one request -> one run -> one result; drain backlog."""
+        self._load_last_runtime_session(
+            agent_id,
+            load_last_session=load_last_session,
+            last_session_messages=last_session_messages,
+        )
         try:
             while True:
                 request = await self.request_queue.get()
@@ -441,7 +576,11 @@ class AgentRuntime:
                     if request.lower() in {"exit", "quit", "q"}:
                         return
                     logger.info("Queue processing request (len=%s)", len(request))
-                    result = await self._process_one_request(agent_id, request)
+                    result = await self._process_one_request(
+                        agent_id,
+                        request,
+                        use_long_memory=use_long_memory,
+                    )
                     await self.result_queue.put(result)
                     try:
                         request = self.request_queue.get_nowait()
@@ -449,6 +588,7 @@ class AgentRuntime:
                         request = None
         finally:
             await self._finalize_runtime_session(agent_id)
+            await self._finalize_long_memory(agent_id, use_long_memory=use_long_memory)
             try:
                 meta = self.get_meta(agent_id)
                 meta.queue_task = None
