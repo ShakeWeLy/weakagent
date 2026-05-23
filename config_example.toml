@@ -47,3 +47,24 @@ max_retries = 2
 lang = "zh"
 # Country code for search results. Options: "us" (United States), "cn" (China), etc.
 country = "cn"
+
+# External MCP servers (Streamable HTTP / SSE / stdio)
+[mcp]
+enabled = false
+transport = "streamable_http"
+server_url = "http://localhost:3001/mcp"
+server_id = "record-app"
+sync_key = "YOUR_SYNC_KEY"
+
+# Or multiple servers:
+# [[mcp.servers]]
+# id = "record-app"
+# transport = "streamable_http"
+# url = "http://localhost:3001/mcp"
+# sync_key = "YOUR_SYNC_KEY"
+#
+# [[mcp.servers]]
+# id = "local-stdio"
+# transport = "stdio"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
