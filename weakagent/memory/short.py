@@ -257,6 +257,33 @@ class ShortMemory(BaseMemory):
         )
         return True
 
+    def needs_pruning(self, *, llm=None) -> bool:
+        """True when short memory exceeds configured turn/message/token limits."""
+        if not self.messages:
+            return False
+        turns = self._identify_complete_turns()
+        if len(turns) > self.max_context_turns:
+            return True
+        if (
+            self.enable_message_limit_cleanup
+            and len(turns) > self.keep_last_n
+        ):
+            return True
+        if (
+            self.enable_message_limit_cleanup
+            and len(self.messages) > self.max_messages
+        ):
+            return True
+        if llm is not None and self._exceeds_token_window(llm):
+            return True
+        return False
+
+    async def prune(self, *, llm) -> bool:
+        """Prune short memory per ``cleanup_strategy``. Returns True if messages changed."""
+        if not self.needs_pruning(llm=llm):
+            return False
+        return await self.cleanup_if_needed(llm=llm)
+
     async def cleanup_if_needed(self, *, llm) -> bool:
         """Cleanup memory before a step/LLM call. Returns True if memory changed."""
         changed = False
@@ -273,17 +300,38 @@ class ShortMemory(BaseMemory):
                     changed |= self._compress_all_turns_to_text_only()
                 else:
                     changed |= self._drop_older_half_turns()
+            if (
+                self.enable_message_limit_cleanup
+                and len(self.messages) > self.max_messages
+            ):
+                changed |= self._trim_keep_last_n(self.keep_last_n)
             return changed
 
         if self.cleanup_strategy == MemoryCleanupStrategy.SUMMARIZE_THEN_KEEP_LAST_N:
             turns = self._identify_complete_turns()
             if len(turns) > self.max_context_turns:
-                return await self._summarize_then_keep_last_n(llm, self.summarize_keep_last_n)
+                return await self._summarize_then_keep_last_n(
+                    llm, self.summarize_keep_last_n
+                )
             if self._exceeds_token_window(llm):
-                return await self._summarize_then_keep_last_n(llm, self.summarize_keep_last_n)
+                return await self._summarize_then_keep_last_n(
+                    llm, self.summarize_keep_last_n
+                )
+            if (
+                self.enable_message_limit_cleanup
+                and len(self.messages) > self.max_messages
+            ):
+                changed |= await self._summarize_then_keep_last_n(
+                    llm, self.summarize_keep_last_n
+                )
             return changed
 
         turns = self._identify_complete_turns()
+        if (
+            self.enable_message_limit_cleanup
+            and len(turns) > self.keep_last_n
+        ):
+            changed |= self._trim_keep_last_n(self.keep_last_n)
         if len(turns) > self.max_context_turns:
             changed |= self._drop_older_half_turns()
             return changed

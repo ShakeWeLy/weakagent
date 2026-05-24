@@ -346,10 +346,22 @@ class BaseAgent(BaseModel, ABC):
         """
         if self.state != AgentState.IDLE:
             raise RuntimeError(f"Cannot run agent from state: {self.state}")
-
-        self.use_long_memory = use_long_memory
-        self.only_save_last_result_to_short = only_save_last_result_to_short
         
+        # reset run_id
+        self.run_id = uuid.uuid4().hex[:12]
+
+        # Prune leftover short_memory before a new run (multi-turn runtime loops).
+        if self.short_memory.messages:
+            try:
+                if await self.short_memory.prune(llm=self.llm):
+                    logger.info(
+                        "Short memory pruned before run (messages=%s strategy=%s)",
+                        len(self.short_memory.messages),
+                        self.short_memory.cleanup_strategy.value,
+                    )
+            except Exception as exc:
+                logger.warning("Short memory prune before run failed: %s", exc)
+
         # record request immediately.
         self.update_memory("user", request)
         self.working_memory.clear_without_system_messages()
@@ -387,12 +399,10 @@ class BaseAgent(BaseModel, ABC):
                     )
 
                     # Memory hygiene before each step (before any potential LLM call in step()).
-                    cleanup = getattr(self.short_memory, "cleanup_if_needed", None)
-                    if callable(cleanup):
-                        try:
-                            await cleanup(llm=self.llm)
-                        except Exception as e:
-                            logger.warning(f"Memory cleanup failed: {e}")
+                    try:
+                        await self.short_memory.prune(llm=self.llm)
+                    except Exception as e:
+                        logger.warning(f"Memory prune failed: {e}")
 
                     step_result = await self.step()
                     self._emit_event(
