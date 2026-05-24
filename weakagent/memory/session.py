@@ -172,10 +172,6 @@ class SessionMemory(BaseMemory):
             )
             conn.commit()
 
-    def add_message(self, message: Message, extra: Optional[Dict[str, Any]] = None) -> None:
-        """Keep in-memory runtime transcript only; persistence is via ConversationMemory."""
-        super().add_message(message)
-
     async def generate_title_from_request(
         self,
         request: str,
@@ -213,6 +209,29 @@ class SessionMemory(BaseMemory):
                 LIMIT 1
                 """
             ).fetchone()
+        return str(row["session_id"]) if row else None
+
+    @classmethod
+    def get_last_session_id_for_agent(
+        cls,
+        agent_id: str,
+        *,
+        db_path: Optional[str] = None,
+        exclude_session_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Most recently updated session row for ``agent_id`` (optional exclude current)."""
+        path = str(cls._resolve_db_path(db_path or "weakagent.sqlite3", MemoryType.SESSION))
+        query = """
+            SELECT session_id FROM session
+            WHERE agent_id = ?
+        """
+        params: List[Any] = [agent_id]
+        if exclude_session_id:
+            query += " AND session_id != ?"
+            params.append(exclude_session_id)
+        query += " ORDER BY updated_at DESC, id DESC LIMIT 1"
+        with cls._connect_db(path) as conn:
+            row = conn.execute(query, params).fetchone()
         return str(row["session_id"]) if row else None
 
     def reload_messages(self) -> List[Message]:

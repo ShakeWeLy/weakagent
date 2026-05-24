@@ -110,3 +110,32 @@ class BaseMemory(BaseModel, ABC):
 
     def ensure_db_parent(self) -> None:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+
+    def clear_without_system_messages(self) -> None:
+        """Clear all messages except system messages"""
+        self.messages = [msg for msg in self.messages if msg.role == "system"]
+
+    def clear_unitl_last_user_message(self) -> None:
+        """Clear all messages until the last user message"""
+        last_user_index = next((i for i, msg in enumerate(reversed(self.messages)) if msg.role == "user"), None)
+        if last_user_index is not None:
+            self.messages = self.messages[:-last_user_index]
+
+
+
+if __name__ == "__main__":
+    memory = BaseMemory(memory_type=MemoryType.CONVERSATION)
+    memory.add_message(Message.system_message("system message"))
+    memory.add_message(Message.user_message("user_1"))
+    memory.add_message(Message.assistant_message("assistant_1"))
+    memory.add_message(Message.user_message("user_2"))
+    memory.add_message(Message.assistant_message("assistant_2"))
+    memory.add_message(Message.user_message("user_3"))
+    memory.add_message(Message.assistant_message("assistant_3"))
+    print(memory.messages)
+
+    memory.clear_unitl_last_user_message()
+    print(memory.messages)
+
+    memory.clear_without_system_messages()
+    print(memory.messages)
