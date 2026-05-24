@@ -9,6 +9,7 @@ from .special_tool.ask_human import AskHumanTool
 from .search import WebSearch, AgentResearchTool
 from .summary import Summary
 from .files import GrepTool, ListFilesTool, PatchFileTool, WriteFileTool
+from .memory import SaveLongMemoryTool
 __all__ = [
     "BaseTool",
     "ToolExecutionResult",
@@ -25,4 +26,5 @@ __all__ = [
     "ListFilesTool",
     "PatchFileTool",
     "WriteFileTool",
+    "SaveLongMemoryTool",
 ]

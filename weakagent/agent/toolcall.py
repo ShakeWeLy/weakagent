@@ -217,7 +217,20 @@ class ToolCallAgent(ReActAgent):
                 },
             )
             t0 = time.perf_counter()
-            result = await self.available_tools.execute(name=name, tool_input=args)
+            if name == "save_long_memory":
+                from weakagent.tools.memory.long import SaveLongMemoryTool
+
+                tool = self.available_tools.get_tool(name)
+                if isinstance(tool, SaveLongMemoryTool):
+                    result = await tool.execute_for_agent(self, **args)
+                else:
+                    result = await self.available_tools.execute(
+                        name=name, tool_input=args
+                    )
+            else:
+                result = await self.available_tools.execute(
+                    name=name, tool_input=args
+                )
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
             # Handle special tools
