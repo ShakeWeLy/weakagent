@@ -168,6 +168,8 @@ class ConversationMemory(BaseMemory):
         }
         if message.tool_calls is not None:
             payload["tool_calls"] = [to_extra_dict(tc) for tc in message.tool_calls]
+        if message.reasoning_content is not None:
+            payload["reasoning_content"] = message.reasoning_content
         if extra:
             payload.update(extra)
 

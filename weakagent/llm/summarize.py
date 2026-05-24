@@ -1,13 +1,18 @@
-from weakagent.llm.llm import LLM
-from weakagent.schemas.message import Message
 from typing import List, Optional
-from weakagent.prompt.summary import load_short_memory_summary_system_prompt, load_working_memory_summary_system_prompt
+
+from weakagent.llm.llm import LLM
+from weakagent.memory.message_store import flatten_messages_for_summary
+from weakagent.prompt.summary import (
+    load_short_memory_summary_system_prompt,
+    load_working_memory_summary_system_prompt,
+)
+from weakagent.schemas.message import Message
 
 
 async def summarize_working_memory(llm: LLM, working_memory: List[Message]) -> Message:
     """Extract reusable skills/workflows from working-memory messages."""
     content = await llm.ask(
-        messages=working_memory,
+        messages=flatten_messages_for_summary(working_memory),
         system_msgs=[Message.system_message(load_working_memory_summary_system_prompt())],
         stream=False,
     )
@@ -19,7 +24,7 @@ async def summarize_short_memory(llm: LLM, short_memory: List[Message]) -> Messa
     if not short_memory:
         return Message.assistant_message("")
     content = await llm.ask(
-        messages=short_memory,
+        messages=flatten_messages_for_summary(short_memory),
         system_msgs=[Message.system_message(load_short_memory_summary_system_prompt())],
         stream=False,
     )

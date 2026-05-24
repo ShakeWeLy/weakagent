@@ -79,6 +79,48 @@ def select_last_n_messages_with_integrity(messages: List[Message], n: int) -> Li
     return sys_prefix + rest[start:]
 
 
+def _tool_call_names(tool_calls: Any) -> List[str]:
+    names: List[str] = []
+    if not tool_calls:
+        return names
+    for tc in tool_calls:
+        if isinstance(tc, dict):
+            fn = tc.get("function") or {}
+            name = fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", None)
+        else:
+            fn = getattr(tc, "function", None)
+            name = getattr(fn, "name", None) if fn is not None else None
+        if name:
+            names.append(str(name))
+    return names
+
+
+def flatten_messages_for_summary(messages: List[Message]) -> List[Message]:
+    """Plain chat transcript for summarization (no thinking/tool-call replay)."""
+    flat: List[Message] = []
+    for m in messages:
+        if m.role == "system":
+            flat.append(
+                m.model_copy(update={"reasoning_content": None, "tool_calls": None})
+            )
+        elif m.role == "user":
+            flat.append(
+                m.model_copy(update={"reasoning_content": None, "tool_calls": None})
+            )
+        elif m.role == "assistant":
+            text = (m.content or "").strip()
+            if not text and m.tool_calls:
+                names = _tool_call_names(m.tool_calls)
+                if names:
+                    text = f"[tools: {', '.join(names)}]"
+            if text:
+                flat.append(Message.assistant_message(text))
+        elif m.role == "tool":
+            label = m.name or "tool"
+            flat.append(Message.user_message(f"[{label}]: {m.content or ''}"))
+    return flat
+
+
 def message_from_storage_row(row: Any) -> Message:
     """Rebuild a Message from a persisted message row (session/runtime)."""
     role = str(row["role"])
