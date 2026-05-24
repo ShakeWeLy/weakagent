@@ -30,15 +30,6 @@ class BaseAgent(BaseModel, ABC):
     Provides foundational functionality for state transitions, memory management,
     and a step-based execution loop. Subclasses must implement the `step` method.
     """
-    def __init__(self, *, session_id: Optional[str] = None, agent_id: Optional[str] = None, **data: Any):
-        super().__init__(**data)
-        self.run_id = f"run_{uuid.uuid4().hex[:12]}"
-        self.state = AgentState.IDLE
-        self.session_id = session_id
-        self.agent_id = agent_id
-        self.user_id = None
-        self.long_memory_user_id = None
-        self.awaiting_human = False
     # Core attributes
     name: str = Field(..., description="Unique name of the agent")
     description: Optional[str] = Field(None, description="Optional agent description")
@@ -84,14 +75,23 @@ class BaseAgent(BaseModel, ABC):
         description="If true, this run is paused awaiting user input; do not persist last_result.",
     )
     # Single-run-level 
-    run_id: Optional[str] = Field(default=None)
+    run_id: Optional[str] = Field(
+        default_factory=lambda: uuid.uuid4().hex[:12],
+        description="Run id for the agent",
+    )
     state: AgentState = Field(
         default=AgentState.IDLE, description="Current agent state"
     )
 
     # session-level persistence helpers (last_request/last_result for each agent.run).
-    session_id: Optional[str] = Field(default=None)
-    agent_id: Optional[str] = Field(default=None)
+    session_id: Optional[str] = Field(
+        default_factory=lambda: uuid.uuid4().hex[:12],
+        description="Session id for the agent",
+    )
+    agent_id: Optional[str] = Field(
+        default_factory=lambda: uuid.uuid4().hex[:12],
+        description="Agent id for the agent",
+    )
     last_request: Optional[str] = Field(default=None)
     last_result: Optional[str] = Field(default=None)
 
@@ -122,6 +122,51 @@ class BaseAgent(BaseModel, ABC):
     skill_filter: Optional[List[str]] = Field(
         default=None, description="Optional allow-list of skill names"
     )
+
+    @model_validator(mode="after")
+    def initialize_agent(self) -> "BaseAgent":
+        """Initialize agent with default settings if not provided."""
+        try:
+            if self.llm is None or not isinstance(self.llm, LLM):
+                self.llm = LLM(config_name=self.name.lower())
+            if not isinstance(self.short_memory, ShortMemory):
+                self.short_memory = ShortMemory(
+                    run_id=self.run_id,
+                    user_id=self.user_id,
+                    agent_type=self.name,
+                    agent_id=self.agent_id,
+                    session_id=self.session_id,
+
+                )
+            if self.session is None or not isinstance(self.session, SessionMemory):
+                self.session = SessionMemory(
+                    run_id=self.run_id,
+                    user_id=self.user_id,
+                    agent_type=self.name,
+                    agent_id=self.agent_id,
+                    session_id=self.session_id,
+
+                )
+            if self.conversation is None:
+                self.conversation = ConversationMemory(
+                    run_id=self.run_id,
+                    user_id=self.user_id,
+                    agent_type=self.name,
+                    agent_id=self.agent_id,
+                    session_id=self.session_id,
+                    )
+
+            if self.use_long_memory:
+                if self.long_memory is None:
+                    self.long_memory = LongMemory(user_id=self.user_id)
+                else:
+                    self.long_memory.user_id = self.user_id
+                self.long_memory.load_for_user(self.user_id)
+                self.update_memory("system", self.long_memory.to_system_message().content)
+            return self
+        except Exception:
+            logger.exception("Failed to initialize agent")
+            return self
 
     def get_skill_manager(self):
         """Lazy-init SkillManager (not a pydantic field to avoid deep copy issues)."""
@@ -192,30 +237,6 @@ class BaseAgent(BaseModel, ABC):
         runtime_cb = getattr(runtime, "on_event", None) if runtime is not None else None
         if runtime_cb is not self.on_event:
             _dispatch(runtime_cb)
-
-    @model_validator(mode="after")
-    def initialize_agent(self) -> "BaseAgent":
-        """Initialize agent with default settings if not provided."""
-        if self.llm is None or not isinstance(self.llm, LLM):
-            self.llm = LLM(config_name=self.name.lower())
-        if not isinstance(self.short_memory, ShortMemory):
-            self.short_memory = ShortMemory()
-        if self.session is None:
-            self.session = SessionMemory(
-                session_id=self.session_id,
-                agent_type=self.name,
-                user_id=self.user_id,
-            )
-        if self.conversation is None:
-            self.conversation = ConversationMemory(agent_type=self.name, user_id=self.user_id)
-
-        if self.use_long_memory:
-            if self.long_memory is None:
-                self.long_memory = LongMemory(user_id=self.user_id)
-            else:
-                self.long_memory.user_id = self.user_id
-            self.long_memory.load_for_user(self.user_id)
-            self.update_memory("system", self.long_memory.to_system_message().content)
 
     def append_message(self, message: Message, *, extra: Optional[Dict[str, Any]] = None) -> None:
         """Append to short memory, conversation log, and in-memory session transcript."""
