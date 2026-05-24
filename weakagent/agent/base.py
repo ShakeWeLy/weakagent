@@ -347,9 +347,12 @@ class BaseAgent(BaseModel, ABC):
         if self.state != AgentState.IDLE:
             raise RuntimeError(f"Cannot run agent from state: {self.state}")
         
-        # reset run_id
-        self.run_id = uuid.uuid4().hex[:12]
-
+        # reset run_id, keep run_id for awaiting_human
+        if not self.awaiting_human:
+            self.run_id = uuid.uuid4().hex[:12]
+            self.short_memory.run_id = self.run_id
+            self.short_memory.flushed_this_run = False
+        
         # Prune leftover short_memory before a new run (multi-turn runtime loops).
         if self.short_memory.messages:
             try:
@@ -398,11 +401,18 @@ class BaseAgent(BaseModel, ABC):
                         },
                     )
 
-                    # Memory hygiene before each step (before any potential LLM call in step()).
+                    # Memory flush: evict oldest messages to sqlite when over limit.
                     try:
-                        await self.short_memory.prune(llm=self.llm)
+                        result = self.short_memory.flush(run_id=self.run_id)
+                        if result.flushed:
+                            logger.info(
+                                "Short memory flushed run_id=%s flushed=%s kept=%s",
+                                self.run_id,
+                                result.flushed_count,
+                                result.kept_count,
+                            )
                     except Exception as e:
-                        logger.warning(f"Memory prune failed: {e}")
+                        logger.warning("Short memory flush failed: %s", e)
 
                     step_result = await self.step()
                     self._emit_event(
@@ -455,17 +465,23 @@ class BaseAgent(BaseModel, ABC):
             return output
         
         finally:
-            # After run, clear the per-run context to keep runs independent.
+            # Snapshot: merge flushed segments + RAM, or save full short_memory.
             try:
-                # if waiting human, no change in memory
+                self.short_memory.finalize_run_memory(run_id=self.run_id)
+            except Exception:
+                logger.exception("Short memory finalize failed")
+
+            try:
                 if not self.awaiting_human:
-                    # only save the user request and last result to the short memory
                     if self.only_save_last_result_to_short:
                         self.short_memory.clear_unitl_last_user_message()
                         self.short_memory.add_message(Message.assistant_message(output))
 
                     if self.summarize_working_memory:
-                        threading.Thread(target=self.working_memory.summarize_and_save, args=(self.run_id,)).start()
+                        threading.Thread(
+                            target=self.working_memory.summarize_and_save,
+                            args=(self.run_id,),
+                        ).start()
 
             except Exception:
                 logger.exception("Failed after run")
