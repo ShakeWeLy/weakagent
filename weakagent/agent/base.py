@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from weakagent.llm import LLM
 from weakagent.utils.logger import get_logger
-from weakagent.schemas.message import ROLE_TYPE, Message
+from weakagent.schemas.message import ROLE_TYPE, Message, Role
 from weakagent.memory.conversation import ConversationMemory
 from weakagent.memory.short import ShortMemory
 from weakagent.memory.long import LongMemory
@@ -67,21 +67,17 @@ class BaseAgent(BaseModel, ABC):
         default=None,
         description="Runtime-scoped session metadata and end-of-loop summary",
     )
-    # long_memory: str = Field(
-    #     default="",
-    #     description="Formatted long-term memory text for prompt injection",
-    # )
-    long_memor: Message = Field(
+    long_memory: Optional[LongMemory] = Field(
+        default=None,
+        description="Long-term memory message for prompt injection",
+    )
+    long_memory_message: Optional[Message] = Field(
         default=None,
         description="Long-term memory message for prompt injection",
     )
     user_id: Optional[str] = Field(
         default=None,
         description="User id for the agent",
-    )
-    long_memory_user_id: Optional[str] = Field(
-        default=None,
-        description="User id for loading/saving runtime_long_memory entries",
     )
     awaiting_human: bool = Field(
         default=False,
@@ -206,42 +202,20 @@ class BaseAgent(BaseModel, ABC):
             self.short_memory = ShortMemory()
         if self.session is None:
             self.session = SessionMemory(
-                session_id=f"sess_{self.name}_{uuid.uuid4().hex[:8]}",
+                session_id=self.session_id,
                 agent_type=self.name,
+                user_id=self.user_id,
             )
         if self.conversation is None:
-            self.conversation = ConversationMemory(agent_type=self.name)
-        self._sync_session_ids()
+            self.conversation = ConversationMemory(agent_type=self.name, user_id=self.user_id)
 
-        if not isinstance(self.runtime_long_memory, LongMemory):
-            self.runtime_long_memory = LongMemory()
-        
         if self.use_long_memory:
-            try:
-                self.runtime_long_memory.load_for_user(self.user_id)
-                self.long_memory = Message.system_message(self.runtime_long_memory.to_system_context())
-            except Exception:
-                logger.exception("Failed to load long memory for user_id=%s", self.user_id)
-        return self
-
-    def _sync_session_ids(self) -> None:
-        """Keep session_id aligned across memory stores."""
-        if self.session is None:
-            return
-        sid = self.session.session_id
-        self.short_memory.session_id = sid
-        if self.conversation is not None:
-            self.conversation.session_id = sid
-            self.conversation.agent_type = self.conversation.agent_type or self.name
-        # if getattr(self.runtime_memory, "session_id", None) != sid:
-        #     self.runtime_memory.session_id = sid
-
-    def _apply_long_memory_to_short(self) -> None:
-        """Inject ``long_memory`` as a system message into short_memory."""
-        context = self.refresh_long_memory()
-        if not context:
-            return
-        self.short_memory.add_message(Message.system_message(context))
+            if self.long_memory is None:
+                self.long_memory = LongMemory(user_id=self.user_id)
+            else:
+                self.long_memory.user_id = self.user_id
+            self.long_memory.load_for_user(self.user_id)
+            self.update_memory("system", self.long_memory.to_system_message().content)
 
     def append_message(self, message: Message, *, extra: Optional[Dict[str, Any]] = None) -> None:
         """Append to short memory, conversation log, and in-memory session transcript."""
@@ -257,12 +231,7 @@ class BaseAgent(BaseModel, ABC):
         if self.conversation is not None:
             if self.run_id:
                 self.conversation.run_id = self.run_id
-            self._sync_session_ids()
             self.conversation.add_message(message, extra=persist_extra)
-        if self.session is not None:
-            if self.run_id:
-                self.session.run_id = self.run_id
-            self.session.add_message(message, extra=persist_extra)
 
     @asynccontextmanager
     async def state_context(self, new_state: AgentState):
@@ -359,10 +328,10 @@ class BaseAgent(BaseModel, ABC):
 
         self.use_long_memory = use_long_memory
         self.only_save_last_result_to_short = only_save_last_result_to_short
-
+        
         # record request immediately.
         self.update_memory("user", request)
-        short_memory_last = self.short_memory  # save last short memory messages
+        self.working_memory.clear_without_system_messages()
 
         # New run begins; if we were previously paused, we are now resuming.
         self.awaiting_human = False
@@ -459,12 +428,9 @@ class BaseAgent(BaseModel, ABC):
             try:
                 # if waiting human, no change in memory
                 if not self.awaiting_human:
-                    threading.Thread(target=self.working_memory.save_summary, args=(self.run_id,)).start()
-                    self.working_memory.clear()
-                    
                     # only save the user request and last result to the short memory
                     if self.only_save_last_result_to_short:
-                        self.short_memory = short_memory_last
+                        self.short_memory.clear_unitl_last_user_message()
                         self.short_memory.add_message(Message.assistant_message(output))
 
                     if self.summarize_working_memory:
