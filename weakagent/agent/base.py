@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import asyncio
 from contextlib import asynccontextmanager
 import inspect
+import threading
 import time
 import uuid
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
@@ -12,10 +13,10 @@ from weakagent.llm import LLM
 from weakagent.utils.logger import get_logger
 from weakagent.schemas.message import ROLE_TYPE, Message
 from weakagent.memory.conversation import ConversationMemory
-from weakagent.memory.session import SessionMemory
 from weakagent.memory.short import ShortMemory
 from weakagent.memory.long import LongMemory
-# from weakagent.memory.runtime_memory import RuntimeMemory  # removed: use session + conversation
+from weakagent.memory.working import WorkingMemory
+from weakagent.memory.session import SessionMemory, SessionMemorySummaryEntry
 from weakagent.schemas.agent import AgentState
 
 logger = get_logger(__name__)
@@ -29,7 +30,15 @@ class BaseAgent(BaseModel, ABC):
     Provides foundational functionality for state transitions, memory management,
     and a step-based execution loop. Subclasses must implement the `step` method.
     """
-
+    def __init__(self, *, session_id: Optional[str] = None, agent_id: Optional[str] = None, **data: Any):
+        super().__init__(**data)
+        self.run_id = f"run_{uuid.uuid4().hex[:12]}"
+        self.state = AgentState.IDLE
+        self.session_id = session_id
+        self.agent_id = agent_id
+        self.user_id = None
+        self.long_memory_user_id = None
+        self.awaiting_human = False
     # Core attributes
     name: str = Field(..., description="Unique name of the agent")
     description: Optional[str] = Field(None, description="Optional agent description")
@@ -44,8 +53,11 @@ class BaseAgent(BaseModel, ABC):
 
     # Dependencies
     llm: LLM = Field(default_factory=LLM, description="Language model instance")
+    working_memory: WorkingMemory = Field(
+        default_factory=WorkingMemory, description="Per-run agent working context"
+    )
     short_memory: ShortMemory = Field(
-        default_factory=ShortMemory, description="Per-run agent working context"
+        default_factory=ShortMemory, description="Per-run agent working context with history"
     )
     conversation: Optional[ConversationMemory] = Field(
         default=None,
@@ -55,17 +67,17 @@ class BaseAgent(BaseModel, ABC):
         default=None,
         description="Runtime-scoped session metadata and end-of-loop summary",
     )
-    # runtime_memory: RuntimeMemory = Field(
-    #     default_factory=RuntimeMemory,
-    #     description="Keeps only request + final output of each run; not cleared after run",
+    # long_memory: str = Field(
+    #     default="",
+    #     description="Formatted long-term memory text for prompt injection",
     # )
-    long_memory: str = Field(
-        default="",
-        description="Formatted long-term memory text for prompt injection",
+    long_memor: Message = Field(
+        default=None,
+        description="Long-term memory message for prompt injection",
     )
-    runtime_long_memory: LongMemory = Field(
-        default_factory=LongMemory,
-        description="Persistent long-term memory store (entries are LongMemoryEntry)",
+    user_id: Optional[str] = Field(
+        default=None,
+        description="User id for the agent",
     )
     long_memory_user_id: Optional[str] = Field(
         default=None,
@@ -75,13 +87,18 @@ class BaseAgent(BaseModel, ABC):
         default=False,
         description="If true, this run is paused awaiting user input; do not persist last_result.",
     )
-    # Runtime-level persistence helpers (last_request/last_result for each agent.run).
-    last_request: Optional[str] = Field(default=None)
-    last_result: Optional[str] = Field(default=None)
+    # Single-run-level 
     run_id: Optional[str] = Field(default=None)
     state: AgentState = Field(
         default=AgentState.IDLE, description="Current agent state"
     )
+
+    # session-level persistence helpers (last_request/last_result for each agent.run).
+    session_id: Optional[str] = Field(default=None)
+    agent_id: Optional[str] = Field(default=None)
+    last_request: Optional[str] = Field(default=None)
+    last_result: Optional[str] = Field(default=None)
+
     on_event: Optional[EventCallback] = Field(
         default=None, description="Optional event callback for agent lifecycle events"
     )
@@ -89,17 +106,20 @@ class BaseAgent(BaseModel, ABC):
     # Execution control
     max_steps: int = Field(default=10, description="Maximum steps before termination")
     current_step: int = Field(default=0, description="Current step in execution")
-
     duplicate_threshold: int = 2
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         extra="allow",
     )
+    
     # Optional
     only_last_result: bool = Field(default="", description="If only return last output result from agent")
     summarize_short_memory: bool = Field(default=False, description="If return the summarize of the short memory")
+    summarize_working_memory: bool = Field(default=False, description="If summarize the working memory to enable SKILLS_USAGE_PROMPT")
     verbose: bool = Field(default=False, description="If verbose the agent execution, llm input and output")
+    use_long_memory: bool = Field(default=False, description="If use long-term memory")
+    only_save_last_result_to_short: bool = Field(default=False, description="If only save the last result to the short memory")
     skills_enabled: bool = Field(
         default=True, description="Inject <available_skills> into system prompts"
     )
@@ -192,32 +212,17 @@ class BaseAgent(BaseModel, ABC):
         if self.conversation is None:
             self.conversation = ConversationMemory(agent_type=self.name)
         self._sync_session_ids()
-        # if not self.runtime_memory.agent_type:
-        #     self.runtime_memory.agent_type = self.name
-        # try:
-        #     self.runtime_memory.ensure_session()
-        # except Exception:
-        #     logger.exception("Failed to ensure runtime session on agent init")
+
         if not isinstance(self.runtime_long_memory, LongMemory):
             self.runtime_long_memory = LongMemory()
-        uid = self.long_memory_user_id or (self.session.user_id if self.session else None)
-        if uid:
-            self.runtime_long_memory.user_id = uid
+        
+        if self.use_long_memory:
             try:
-                self.runtime_long_memory.load_for_user(uid)
-                self.long_memory = self.runtime_long_memory.to_system_context()
+                self.runtime_long_memory.load_for_user(self.user_id)
+                self.long_memory = Message.system_message(self.runtime_long_memory.to_system_context())
             except Exception:
-                logger.exception("Failed to load long memory for user_id=%s", uid)
+                logger.exception("Failed to load long memory for user_id=%s", self.user_id)
         return self
-
-    def refresh_long_memory(self) -> str:
-        """Reload ``runtime_long_memory`` entries and refresh ``long_memory`` text."""
-        uid = self.long_memory_user_id or (self.session.user_id if self.session else None)
-        if uid:
-            self.runtime_long_memory.user_id = uid
-            self.runtime_long_memory.load_for_user(uid)
-        self.long_memory = self.runtime_long_memory.to_system_context()
-        return self.long_memory
 
     def _sync_session_ids(self) -> None:
         """Keep session_id aligned across memory stores."""
@@ -240,6 +245,7 @@ class BaseAgent(BaseModel, ABC):
 
     def append_message(self, message: Message, *, extra: Optional[Dict[str, Any]] = None) -> None:
         """Append to short memory, conversation log, and in-memory session transcript."""
+        self.working_memory.add_message(message)
         self.short_memory.add_message(message)
         persist_extra = {
             "agent": self.name,
@@ -334,6 +340,7 @@ class BaseAgent(BaseModel, ABC):
         request: Optional[str] = None,
         *,
         use_long_memory: bool = False,
+        only_save_last_result_to_short: bool = False,
     ) -> str:
         """Execute the agent's main loop asynchronously.
 
@@ -350,23 +357,12 @@ class BaseAgent(BaseModel, ABC):
         if self.state != AgentState.IDLE:
             raise RuntimeError(f"Cannot run agent from state: {self.state}")
 
-        # # RuntimeMemory: record request immediately (not cleared after run).
-        # self.runtime_memory.add_request(request)
+        self.use_long_memory = use_long_memory
+        self.only_save_last_result_to_short = only_save_last_result_to_short
 
-        # Each run uses an independent short_memory context.
-        if not self.awaiting_human:
-            self.short_memory.clear()
-            if use_long_memory:
-                self._apply_long_memory_to_short()
-            # Load runtime session transcript into this run's short_memory context.
-            if self.session is not None and self.session.messages:
-                self.short_memory.add_messages(list(self.session.messages))
-            # # Load runtime_memory history into this run's short_memory context.
-            # if self.runtime_memory.messages:
-            #     self.short_memory.add_messages(list(self.runtime_memory.messages))
-        # If awaiting human, add request to memory and keep the lasted short_memory messages(no clear).
-        else:
-            self.update_memory("user", request)
+        # record request immediately.
+        self.update_memory("user", request)
+        short_memory_last = self.short_memory  # save last short memory messages
 
         # New run begins; if we were previously paused, we are now resuming.
         self.awaiting_human = False
@@ -374,25 +370,14 @@ class BaseAgent(BaseModel, ABC):
         self.last_result = None
 
         results: List[str] = []
-        run_id = f"run_{uuid.uuid4().hex[:12]}"
-        self.run_id = run_id
-        if self.session is not None:
-            self.session.run_id = run_id
-            self._sync_session_ids()
-            if request:
-                try:
-                    await self.session.generate_title_from_request(
-                        request, llm=LLM(config_name="fast")
-                    )
-                except Exception:
-                    logger.exception("Failed to generate session title")
+        output: Optional[str] = None
         self._emit_event(
             "agent_run_start",
             {
                 "name": self.name,
                 "max_steps": self.max_steps,
                 "request_len": len(request or ""),
-                "run_id": run_id,
+                "run_id": self.run_id,
             },
         )
         try:
@@ -452,44 +437,41 @@ class BaseAgent(BaseModel, ABC):
                     "current_step": self.current_step,
                     "state": str(self.state),
                     "output_len": len(output),
-                    "run_id": run_id,
+                    "run_id": self.run_id,
                 },
             )
-            
-            # # RuntimeMemory: append final output after run completes.
-            # try:
-            #     self.runtime_memory.add_last_result(self.last_result)
-            # except Exception:
-            #     logger.exception("Failed to write runtime_memory last_result")
-
-            # Persist full short-memory snapshot for this run.
-            try:
-                self._sync_session_ids()
-                self.short_memory.run_id = run_id or self.short_memory.run_id
-                self.short_memory.agent_type = self.short_memory.agent_type or self.name
-                self.short_memory.save_snapshot(run_id=run_id)
-            except Exception:
-                logger.exception("Failed to save short_memory snapshot")
 
             # Select the last result from the short memory
             if self.summarize_short_memory:
                 from weakagent.llm.summarize import summarize_short_memory as _summarize_short
-
                 summary_msg = await _summarize_short(
                     self.llm, list(self.short_memory.messages)
                 )
-                return summary_msg.content or ""
+                output = summary_msg.content or ""
+                return output
             if self.only_last_result:
-                return self.last_result
+                output = self.last_result
+                return output
             return output
         
         finally:
             # After run, clear the per-run context to keep runs independent.
             try:
+                # if waiting human, no change in memory
                 if not self.awaiting_human:
-                    self.short_memory.clear()
+                    threading.Thread(target=self.working_memory.save_summary, args=(self.run_id,)).start()
+                    self.working_memory.clear()
+                    
+                    # only save the user request and last result to the short memory
+                    if self.only_save_last_result_to_short:
+                        self.short_memory = short_memory_last
+                        self.short_memory.add_message(Message.assistant_message(output))
+
+                    if self.summarize_working_memory:
+                        threading.Thread(target=self.working_memory.summarize_and_save, args=(self.run_id,)).start()
+
             except Exception:
-                logger.exception("Failed to clear short_memory after run")
+                logger.exception("Failed after run")
 
     @abstractmethod
     async def step(self) -> str:
