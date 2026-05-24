@@ -12,9 +12,10 @@ from weakagent.llm import LLM
 from weakagent.utils.logger import get_logger
 from weakagent.schemas.message import ROLE_TYPE, Message
 from weakagent.memory.conversation import ConversationMemory
+from weakagent.memory.session import SessionMemory
 from weakagent.memory.short import ShortMemory
 from weakagent.memory.long import LongMemory
-from weakagent.memory.runtime_memory import RuntimeMemory
+# from weakagent.memory.runtime_memory import RuntimeMemory  # removed: use session + conversation
 from weakagent.schemas.agent import AgentState
 
 logger = get_logger(__name__)
@@ -47,12 +48,17 @@ class BaseAgent(BaseModel, ABC):
         default_factory=ShortMemory, description="Per-run agent working context"
     )
     conversation: Optional[ConversationMemory] = Field(
-        default=None, description="Persistent conversation store"
+        default=None,
+        description="Append-only per-message persistence",
     )
-    runtime_memory: RuntimeMemory = Field(
-        default_factory=RuntimeMemory,
-        description="Keeps only request + final output of each run; not cleared after run",
+    session: Optional[SessionMemory] = Field(
+        default=None,
+        description="Runtime-scoped session metadata and end-of-loop summary",
     )
+    # runtime_memory: RuntimeMemory = Field(
+    #     default_factory=RuntimeMemory,
+    #     description="Keeps only request + final output of each run; not cleared after run",
+    # )
     long_memory: str = Field(
         default="",
         description="Formatted long-term memory text for prompt injection",
@@ -69,7 +75,7 @@ class BaseAgent(BaseModel, ABC):
         default=False,
         description="If true, this run is paused awaiting user input; do not persist last_result.",
     )
-    # Runtime-level persistence helpers (used by AgentRuntime to write RuntimeMemory).
+    # Runtime-level persistence helpers (last_request/last_result for each agent.run).
     last_request: Optional[str] = Field(default=None)
     last_result: Optional[str] = Field(default=None)
     run_id: Optional[str] = Field(default=None)
@@ -178,20 +184,23 @@ class BaseAgent(BaseModel, ABC):
             self.llm = LLM(config_name=self.name.lower())
         if not isinstance(self.short_memory, ShortMemory):
             self.short_memory = ShortMemory()
-        if self.conversation is None:
-            self.conversation = ConversationMemory(
+        if self.session is None:
+            self.session = SessionMemory(
                 session_id=f"sess_{self.name}_{uuid.uuid4().hex[:8]}",
                 agent_type=self.name,
             )
-        if not self.runtime_memory.agent_type:
-            self.runtime_memory.agent_type = self.name
-        try:
-            self.runtime_memory.ensure_session()
-        except Exception:
-            logger.exception("Failed to ensure runtime session on agent init")
+        if self.conversation is None:
+            self.conversation = ConversationMemory(agent_type=self.name)
+        self._sync_session_ids()
+        # if not self.runtime_memory.agent_type:
+        #     self.runtime_memory.agent_type = self.name
+        # try:
+        #     self.runtime_memory.ensure_session()
+        # except Exception:
+        #     logger.exception("Failed to ensure runtime session on agent init")
         if not isinstance(self.runtime_long_memory, LongMemory):
             self.runtime_long_memory = LongMemory()
-        uid = self.long_memory_user_id or self.runtime_memory.user_id
+        uid = self.long_memory_user_id or (self.session.user_id if self.session else None)
         if uid:
             self.runtime_long_memory.user_id = uid
             try:
@@ -203,12 +212,24 @@ class BaseAgent(BaseModel, ABC):
 
     def refresh_long_memory(self) -> str:
         """Reload ``runtime_long_memory`` entries and refresh ``long_memory`` text."""
-        uid = self.long_memory_user_id or self.runtime_memory.user_id
+        uid = self.long_memory_user_id or (self.session.user_id if self.session else None)
         if uid:
             self.runtime_long_memory.user_id = uid
             self.runtime_long_memory.load_for_user(uid)
         self.long_memory = self.runtime_long_memory.to_system_context()
         return self.long_memory
+
+    def _sync_session_ids(self) -> None:
+        """Keep session_id aligned across memory stores."""
+        if self.session is None:
+            return
+        sid = self.session.session_id
+        self.short_memory.session_id = sid
+        if self.conversation is not None:
+            self.conversation.session_id = sid
+            self.conversation.agent_type = self.conversation.agent_type or self.name
+        # if getattr(self.runtime_memory, "session_id", None) != sid:
+        #     self.runtime_memory.session_id = sid
 
     def _apply_long_memory_to_short(self) -> None:
         """Inject ``long_memory`` as a system message into short_memory."""
@@ -218,10 +239,8 @@ class BaseAgent(BaseModel, ABC):
         self.short_memory.add_message(Message.system_message(context))
 
     def append_message(self, message: Message, *, extra: Optional[Dict[str, Any]] = None) -> None:
-        """Append message to memory and conversation storage."""
+        """Append to short memory, conversation log, and in-memory session transcript."""
         self.short_memory.add_message(message)
-        if self.conversation is None:
-            return
         persist_extra = {
             "agent": self.name,
             "state": str(self.state),
@@ -229,7 +248,15 @@ class BaseAgent(BaseModel, ABC):
         }
         if extra:
             persist_extra.update(extra)
-        self.conversation.add_message(message, extra=persist_extra)
+        if self.conversation is not None:
+            if self.run_id:
+                self.conversation.run_id = self.run_id
+            self._sync_session_ids()
+            self.conversation.add_message(message, extra=persist_extra)
+        if self.session is not None:
+            if self.run_id:
+                self.session.run_id = self.run_id
+            self.session.add_message(message, extra=persist_extra)
 
     @asynccontextmanager
     async def state_context(self, new_state: AgentState):
@@ -323,17 +350,20 @@ class BaseAgent(BaseModel, ABC):
         if self.state != AgentState.IDLE:
             raise RuntimeError(f"Cannot run agent from state: {self.state}")
 
-        # RuntimeMemory: record request immediately (not cleared after run).
-        self.runtime_memory.add_request(request)
+        # # RuntimeMemory: record request immediately (not cleared after run).
+        # self.runtime_memory.add_request(request)
 
         # Each run uses an independent short_memory context.
         if not self.awaiting_human:
             self.short_memory.clear()
             if use_long_memory:
                 self._apply_long_memory_to_short()
-            # Load runtime_memory history into this run's short_memory context.
-            if self.runtime_memory.messages:
-                self.short_memory.add_messages(list(self.runtime_memory.messages))
+            # Load runtime session transcript into this run's short_memory context.
+            if self.session is not None and self.session.messages:
+                self.short_memory.add_messages(list(self.session.messages))
+            # # Load runtime_memory history into this run's short_memory context.
+            # if self.runtime_memory.messages:
+            #     self.short_memory.add_messages(list(self.runtime_memory.messages))
         # If awaiting human, add request to memory and keep the lasted short_memory messages(no clear).
         else:
             self.update_memory("user", request)
@@ -343,17 +373,19 @@ class BaseAgent(BaseModel, ABC):
         self.last_request = request
         self.last_result = None
 
-        if self.conversation is not None and request:
-            try:
-                await self.conversation.generate_title_from_request(
-                    request, llm=LLM(config_name="fast")
-                )
-            except Exception:
-                logger.exception("Failed to generate conversation session title")
-
         results: List[str] = []
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         self.run_id = run_id
+        if self.session is not None:
+            self.session.run_id = run_id
+            self._sync_session_ids()
+            if request:
+                try:
+                    await self.session.generate_title_from_request(
+                        request, llm=LLM(config_name="fast")
+                    )
+                except Exception:
+                    logger.exception("Failed to generate session title")
         self._emit_event(
             "agent_run_start",
             {
@@ -424,30 +456,29 @@ class BaseAgent(BaseModel, ABC):
                 },
             )
             
-            if self.conversation is not None:
-                try:
-                    summarize_short_memory = await self.conversation.write_session_summary(
-                        run_id=run_id,
-                        status=str(self.state),
-                        llm=LLM(config_name="fast"),
-                        extra={"stream": False},
-                    )
-                except Exception:
-                    logger.exception("Failed to write session summary")
-            # RuntimeMemory: append final output after run completes.
+            # # RuntimeMemory: append final output after run completes.
+            # try:
+            #     self.runtime_memory.add_last_result(self.last_result)
+            # except Exception:
+            #     logger.exception("Failed to write runtime_memory last_result")
+
+            # Persist full short-memory snapshot for this run.
             try:
-                self.runtime_memory.add_last_result(self.last_result)
+                self._sync_session_ids()
+                self.short_memory.run_id = run_id or self.short_memory.run_id
+                self.short_memory.agent_type = self.short_memory.agent_type or self.name
+                self.short_memory.save_snapshot(run_id=run_id)
             except Exception:
-                logger.exception("Failed to write runtime_memory last_result")
-            
+                logger.exception("Failed to save short_memory snapshot")
+
             # Select the last result from the short memory
             if self.summarize_short_memory:
-                if summarize_short_memory:
-                    return summarize_short_memory
-                else:
-                    from weakagent.llm.summarize import summarize_short_memory
-                    summary = await summarize_short_memory(self.llm, self.short_memory.messages)
-                    return summary
+                from weakagent.llm.summarize import summarize_short_memory as _summarize_short
+
+                summary_msg = await _summarize_short(
+                    self.llm, list(self.short_memory.messages)
+                )
+                return summary_msg.content or ""
             if self.only_last_result:
                 return self.last_result
             return output

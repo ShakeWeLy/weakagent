@@ -13,7 +13,7 @@ from weakagent.config.settings import PROJECT_ROOT
 from weakagent.llm.llm import LLM
 from weakagent.llm.summarize import extract_long_memory
 from weakagent.memory.base import BaseMemory, MemoryType
-from weakagent.memory.runtime_memory import RuntimeMemory
+from weakagent.memory.session import SessionMemory
 from weakagent.schemas.message import Message
 from weakagent.utils.logger import get_logger
 
@@ -63,7 +63,7 @@ class LongMemory(BaseMemory):
             raw = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
         except Exception:
             raw = {}
-        for section in ("memory", "conversation", "scheduler"):
+        for section in ("memory", "conversation", "session", "scheduler"):
             configured = (raw.get(section) or {}).get("db_path")
             if configured:
                 cp = Path(str(configured))
@@ -210,14 +210,14 @@ class LongMemory(BaseMemory):
             )
         return result
 
-    async def extract_and_save_from_runtime_memory(
+    async def extract_and_save_from_session(
         self,
-        runtime_memory: RuntimeMemory,
+        session: SessionMemory,
         *,
         llm: Optional[LLM] = None,
     ) -> dict:
-        """Extract long-term memory from a runtime_memory transcript and persist."""
-        text = runtime_memory.format_for_long_memory_extraction()
+        """Extract long-term memory from a runtime session transcript and persist."""
+        text = session.format_for_long_memory_extraction()
         if not text or text == "[]":
             return {"should_save": False}
         return await self.extract_and_save(text, llm=llm)

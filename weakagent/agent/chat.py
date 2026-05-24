@@ -3,7 +3,7 @@ from weakagent.schemas.message import Message
 from weakagent.agent.base import BaseAgent
 from weakagent.memory.short import ShortMemory
 from weakagent.schemas.agent import AgentState
-from weakagent.memory.base import MemoryCleanupStrategy
+from weakagent.memory.short import MemoryCleanupStrategy
 
 CHAT_SYSTEM_PROMPT = """
 You are a helpful and natural conversational assistant.

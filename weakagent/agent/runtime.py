@@ -95,7 +95,7 @@ class AgentRuntime:
         if parent_id:
             self._agents[parent_id].children.add(resolved_id)
 
-        self._wire_runtime_session(agent, agent_id=resolved_id, agent_type=resolved_type)
+        self._wire_session(agent, agent_id=resolved_id, agent_type=resolved_type)
         return resolved_id
 
     def _load_last_runtime_session(
@@ -105,68 +105,103 @@ class AgentRuntime:
         load_last_session: bool,
         last_session_messages: int = 10,
     ) -> None:
-        """Hydrate agent runtime_memory from the previous session's raw messages."""
+        """Optionally reload prior session transcript from conversation store."""
         if not load_last_session:
             return
         agent = self.get(agent_id)
-        rm = getattr(agent, "runtime_memory", None)
-        if rm is None:
+        sess = getattr(agent, "session", None)
+        if sess is None:
             return
-        if rm.messages:
+        if sess.messages:
             logger.debug(
-                "Skip load_last_session: runtime_memory already has %s message(s)",
-                len(rm.messages),
+                "Skip load_last_session: session already has %s message(s)",
+                len(sess.messages),
             )
             return
-        rm.agent_id = agent_id
         try:
-            rm.load_last_runtime_session(last_n=last_session_messages)
+            sess.reload_messages()
+            if last_session_messages > 0 and len(sess.messages) > last_session_messages:
+                from weakagent.memory.message_store import select_last_n_messages_with_integrity
+
+                sess.messages = select_last_n_messages_with_integrity(
+                    sess.messages, last_session_messages
+                )
         except Exception:
             logger.exception(
-                "Failed to load last runtime session for agent_id=%s", agent_id
+                "Failed to load last session for agent_id=%s", agent_id
             )
 
-    def _wire_runtime_session(
-        self, agent: BaseAgent, *, agent_id: str, agent_type: str
-    ) -> None:
-        """Bind managed agent metadata to runtime_memory session rows."""
-        rm = getattr(agent, "runtime_memory", None)
-        if rm is None:
+        # # RuntimeMemory: hydrate from previous runtime_session sqlite rows.
+        # rm = getattr(agent, "runtime_memory", None)
+        # if rm is None:
+        #     return
+        # if rm.messages:
+        #     return
+        # rm.agent_id = agent_id
+        # rm.load_last_runtime_session(last_n=last_session_messages)
+
+    def _wire_session(self, agent: BaseAgent, *, agent_id: str, agent_type: str) -> None:
+        """Bind managed agent metadata to session / conversation / short memory."""
+        sess = getattr(agent, "session", None)
+        if sess is None:
             return
-        rm.agent_id = agent_id
-        rm.agent_type = rm.agent_type or agent_type
-        uid = getattr(rm, "user_id", None)
+        sess.agent_id = agent_id
+        sess.agent_type = sess.agent_type or agent_type
+        agent.short_memory.session_id = sess.session_id
+        conv = getattr(agent, "conversation", None)
+        if conv is not None:
+            conv.session_id = sess.session_id
+            conv.agent_id = agent_id
+            conv.agent_type = conv.agent_type or agent_type
+        try:
+            sess.ensure_session()
+        except Exception:
+            logger.exception("Failed to ensure session for agent_id=%s", agent_id)
+        uid = getattr(sess, "user_id", None)
         if uid and getattr(agent, "long_memory_user_id", None) is None:
             agent.long_memory_user_id = uid
         if uid:
             agent.runtime_long_memory.user_id = uid
-        try:
-            rm.ensure_session()
-        except Exception:
-            logger.exception("Failed to ensure runtime session for agent_id=%s", agent_id)
+
+        # # RuntimeMemory wiring (removed).
+        # rm = getattr(agent, "runtime_memory", None)
+        # if rm is not None:
+        #     rm.agent_id = agent_id
+        #     rm.agent_type = rm.agent_type or agent_type
+        #     rm.session_id = sess.session_id
+        #     rm.ensure_session()
+
+    def _wire_runtime_session(
+        self, agent: BaseAgent, *, agent_id: str, agent_type: str
+    ) -> None:
+        """Alias for ``_wire_session`` (kept for compatibility)."""
+        self._wire_session(agent, agent_id=agent_id, agent_type=agent_type)
 
     async def _finalize_long_memory(
         self, agent_id: str, *, use_long_memory: bool = False
     ) -> Optional[dict]:
-        """Extract and persist long-term memory from runtime_memory on loop exit."""
+        """Extract and persist long-term memory from session transcript on loop exit."""
         if not use_long_memory:
             return None
         if agent_id not in self._agents:
             return None
         agent = self._agents[agent_id].agent
-        rm = getattr(agent, "runtime_memory", None)
-        if rm is None or not rm.messages:
+        sess = getattr(agent, "session", None)
+        if sess is None:
+            return None
+        sess.reload_messages()
+        if not sess.messages:
             logger.info(
-                "Skip long memory finalize: no runtime_memory messages agent_id=%s",
+                "Skip long memory finalize: no session messages agent_id=%s",
                 agent_id,
             )
             return None
-        uid = getattr(agent, "long_memory_user_id", None) or getattr(rm, "user_id", None)
+        uid = getattr(agent, "long_memory_user_id", None) or getattr(sess, "user_id", None)
         if uid:
             agent.runtime_long_memory.user_id = uid
         try:
-            result = await agent.runtime_long_memory.extract_and_save_from_runtime_memory(
-                rm,
+            result = await agent.runtime_long_memory.extract_and_save_from_session(
+                sess,
                 llm=LLM(config_name="fast"),
             )
             agent.long_memory = agent.runtime_long_memory.to_system_context()
@@ -185,50 +220,59 @@ class AgentRuntime:
             )
             return None
 
+        # # RuntimeMemory long-memory extraction (removed).
+        # rm = getattr(agent, "runtime_memory", None)
+        # if rm is None or not rm.messages:
+        #     return None
+        # return await agent.runtime_long_memory.extract_and_save_from_runtime_memory(rm, ...)
+
     async def _finalize_runtime_session(
         self, agent_id: str, *, status: str = "closed"
     ) -> Optional[str]:
-        """Summarize and persist runtime session when an interactive/queue loop ends."""
+        """Summarize and persist session when an interactive/queue loop ends."""
         if agent_id not in self._agents:
             logger.warning(
-                "Skip runtime session finalize: agent_id=%s not in registry", agent_id
+                "Skip session finalize: agent_id=%s not in registry", agent_id
             )
             return None
         meta = self._agents[agent_id]
         agent = meta.agent
-        rm = getattr(agent, "runtime_memory", None)
-        if rm is None:
-            return None
-        if not rm.messages:
-            logger.info("Skip runtime session finalize: no messages for agent_id=%s", agent_id)
+        session = getattr(agent, "session", None)
+        if session is None:
             return None
 
-        rm.agent_id = agent_id
-        rm.agent_type = rm.agent_type or meta.agent_type
+        session.agent_id = agent_id
+        session.agent_type = session.agent_type or meta.agent_type
         try:
-            summary = await rm.finalize_session(
+            summary = await session.finalize_runtime_summary(
                 status=status,
-                run_id=f"loop_{agent_id}",
                 llm=LLM(config_name="fast"),
                 extra={
                     "agent_id": agent_id,
                     "agent_name": getattr(agent, "name", ""),
                     "agent_type": meta.agent_type,
+                    "source": "runtime_loop_finalize",
                 },
             )
             logger.info(
-                "Runtime session finalized session_id=%s agent_id=%s",
-                rm.session_id,
+                "Session finalized session_id=%s agent_id=%s",
+                session.session_id,
                 agent_id,
             )
             return summary
         except Exception:
             logger.exception(
-                "Failed to finalize runtime session agent_id=%s session_id=%s",
+                "Failed to finalize session agent_id=%s session_id=%s",
                 agent_id,
-                getattr(rm, "session_id", None),
+                getattr(session, "session_id", None),
             )
             return None
+
+        # # RuntimeMemory finalize (removed).
+        # rm = getattr(agent, "runtime_memory", None)
+        # if rm is None or not rm.messages:
+        #     return None
+        # return await rm.finalize_session(status=status, run_id=f"loop_{agent_id}", ...)
 
     def create_agent(
         self,
