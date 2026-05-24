@@ -4,7 +4,7 @@ Runtime loop + Skills + MCP combined demo.
 Flow:
   skills/ + workspace/skills/  -> <available_skills> in act system prompt
   config.toml [mcp]            -> MCP tools merged into agent
-  AgentRuntime.run_loop()      -> interactive You> loop, runtime_memory persists
+  AgentRuntime.run_loop()      -> interactive You> loop, session transcript persists
 
 Prerequisites:
   - config.toml: [llm.fast], [skills], [mcp] (Record App on :3001 if using MCP)
@@ -14,6 +14,7 @@ Run from project root:
 
     python examples/10_mcp_agent_demo.py
     python examples/10_mcp_agent_demo.py --request "列出待办"
+    python examples/10_mcp_agent_demo.py --load-last-session
 """
 
 from __future__ import annotations
@@ -30,16 +31,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from pydantic import Field
 
-from weakagent.agent import AgentFactory, AgentRuntime, AgentSpec, BriefReActAgent, ToolCallAgent
+from weakagent.agent import AgentFactory, AgentRuntime, AgentSpec, BriefReActAgent
 from weakagent.llm.llm import LLM
-from weakagent.mcp import attach_mcp_to_tools, load_mcp_settings
+from weakagent.mcp import MCPClients, attach_mcp_to_tools, load_mcp_settings
 from weakagent.prompt.brief_react import ACT_SYSTEM_PROMPT, THINK_SYSTEM_PROMPT
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolChoice
 from weakagent.skills.manager import SkillManager
 from weakagent.tools import ToolCollection, Terminate
 from weakagent.tools.files import ReadFileTool
-
-SYSTEM_PROMPT = f"""## Skills
+from weakagent.utils.logger import logger
+SYSTEM_PROMPT = """## Skills
 When the user task matches an entry in <available_skills>, use the `read` tool to load
 the skill file at <location> (usually SKILL.md), then follow its instructions.
 
@@ -49,8 +50,11 @@ Remote tools are prefixed with `mcp_record-app_` (or similar). Use them for todo
 Read current state with list_* before mutating. Do not invent data.
 """
 
-COMBINED_ACT_PROMPT = f"""{ACT_SYSTEM_PROMPT}+{SYSTEM_PROMPT}
+COMBINED_ACT_PROMPT = f"""{ACT_SYSTEM_PROMPT.rstrip()}
+
+{SYSTEM_PROMPT.strip()}
 """
+
 
 class RuntimeSkillsMCPAgent(BriefReActAgent):
     """Brief ReAct agent: runtime loop + skills catalog + MCP tools."""
@@ -67,19 +71,9 @@ class RuntimeSkillsMCPAgent(BriefReActAgent):
     verbose: bool = True
     only_last_result: bool = True
 
-# class RuntimeSkillsMCPAgent(ToolCallAgent):
-#     name: str = "runtime_skills_mcp"
-#     description: str = "Interactive agent with skills and external MCP"
-#     system_prompt: str = SYSTEM_PROMPT
-#     available_tools: ToolCollection = ToolCollection(Terminate(), ReadFileTool())
-#     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
-#     special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name])
-#     skills_enabled: bool = True
-#     max_steps: int = 12
-#     verbose: bool = False
-#     only_last_result: bool = True
 
 def _print_skills_catalog() -> None:
+    """List enabled skills from builtin + workspace directories."""
     mgr = SkillManager()
     entries = mgr.filter_skills()
     print("=== Skills (enabled) ===")
@@ -87,11 +81,13 @@ def _print_skills_catalog() -> None:
         print("  (none — add skills under skills/ or workspace/skills/)")
         return
     for e in entries:
-        print(f"  - {e.skill.name}: {e.skill.description[:70]}")
+        desc = (e.skill.description or "")[:70]
+        print(f"  - {e.skill.name}: {desc}")
         print(f"    file: {e.skill.file_path}")
 
 
 def _print_mcp_tools(agent: RuntimeSkillsMCPAgent) -> None:
+    """Show MCP tools merged into the agent (names are prefixed with mcp_<server>_)"""
     print("=== MCP tools ===")
     found = False
     for name, tool in agent.available_tools.tool_map.items():
@@ -111,9 +107,19 @@ async def run_interactive_loop(
     load_last_session: bool = False,
     last_session_messages: int = 10,
     use_long_memory: bool = False,
-    long_memory_user_id: Optional[str] = "demo_user",
+    user_id: Optional[str] = "demo_user",
 ) -> None:
+    """Create agent, attach MCP tools, then run the CLI loop until exit/quit/q.
+
+    Args:
+        first_request: Optional first user message (skips first You> prompt).
+        load_last_session: Hydrate short/session memory from the prior sqlite session.
+        last_session_messages: How many prior messages to load (-1 = all).
+        use_long_memory: Inject long memory each turn; extract on loop exit.
+        user_id: agent.user_id for session, conversation, and long_term_memory rows.
+    """
     mcp_settings = load_mcp_settings()
+    print(f"MCP enabled: {mcp_settings.enabled}")
 
     factory = AgentFactory()
     factory.register_spec(
@@ -133,17 +139,12 @@ async def run_interactive_loop(
         agent_id=stable_agent_id,
         name="runtime_skills_mcp_agent",
         llm=LLM(config_name="fast"),
+        user_id=user_id,
     )
     agent = runtime.get(agent_id)
     assert isinstance(agent, RuntimeSkillsMCPAgent)
-    if long_memory_user_id:
-        agent.long_memory_user_id = long_memory_user_id
-        agent.runtime_memory.user_id = long_memory_user_id
-        agent.runtime_long_memory.user_id = long_memory_user_id
-        agent.runtime_memory.ensure_session()
-        agent.refresh_long_memory()
 
-    mcp_clients = None
+    mcp_clients: Optional[MCPClients] = None
     if mcp_settings.enabled:
         _, mcp_clients = await attach_mcp_to_tools(agent.available_tools)
 
@@ -151,7 +152,7 @@ async def run_interactive_loop(
     _print_mcp_tools(agent)
 
     print("\n=== Runtime loop (type exit / quit / q to end) ===")
-    print("Layers: runtime_memory (跨轮) | skills (<available_skills>) | MCP tools\n")
+    print("Layers: session transcript (跨轮) | skills | MCP tools\n")
 
     try:
         await runtime.run_loop(
@@ -161,8 +162,10 @@ async def run_interactive_loop(
             last_session_messages=last_session_messages,
             use_long_memory=use_long_memory,
         )
+    except Exception:
+        logger.exception("Failed to run interactive loop")
     finally:
-        if mcp_clients:
+        if mcp_clients is not None:
             await mcp_clients.disconnect()
         # run_loop already cleanup(agent_id); reset singleton for clean re-run in tests
         AgentRuntime._instance = None
@@ -191,12 +194,12 @@ async def main() -> None:
     parser.add_argument(
         "--use-long-memory",
         action="store_true",
-        help="Inject long memory each run; extract from runtime_memory on loop exit",
+        help="Inject long memory each run; extract from session on loop exit",
     )
     parser.add_argument(
-        "--long-memory-user-id",
+        "--user-id",
         default="demo_user",
-        help="User id for long_term_memory sqlite rows",
+        help="agent.user_id for session / conversation / long memory",
     )
     args = parser.parse_args()
 
@@ -206,7 +209,7 @@ async def main() -> None:
             load_last_session=args.load_last_session,
             last_session_messages=args.last_session_messages,
             use_long_memory=args.use_long_memory,
-            long_memory_user_id=args.long_memory_user_id or None,
+            user_id=args.user_id or None,
         )
     except KeyboardInterrupt:
         print("\nInterrupted.")
