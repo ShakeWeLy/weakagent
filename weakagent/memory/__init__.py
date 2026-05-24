@@ -1,7 +1,7 @@
 """Memory module for WeakAgent."""
 
 from .base import BaseMemory, MemoryType
-from .short import MemoryCleanupStrategy, ShortMemory, ShortMemorySnapshotEntry
+from .short import MemoryCleanupStrategy, ShortMemory
 from .conversation import ConversationMemory
 from .session import SessionMemory, SessionMemorySummaryEntry, SessionRecord
 from .long import LongMemory, LongMemoryEntry
@@ -12,7 +12,6 @@ __all__ = [
     "MemoryCleanupStrategy",
     "MemoryType",
     "ShortMemory",
-    "ShortMemorySnapshotEntry",
     "ConversationMemory",
     "SessionMemory",
     "SessionMemorySummaryEntry",

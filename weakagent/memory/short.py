@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import uuid
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from weakagent.llm.summarize import summarize_short_memory
 from weakagent.memory.base import BaseMemory, MemoryType
@@ -21,26 +20,10 @@ class MemoryCleanupStrategy(str, Enum):
     SUMMARIZE_THEN_KEEP_LAST_N = "summarize_then_keep_last_n"
 
 
-class ShortMemorySnapshotEntry(BaseModel):
-    """One persisted full short-memory message snapshot."""
-
-    snapshot_id: str
-    run_id: str
-    session_id: Optional[str] = None
-    user_id: Optional[str] = None
-    agent_type: Optional[str] = None
-    agent_id: Optional[str] = None
-    status: str = "completed"
-    messages_count: int = 0
-    extra: Optional[Dict[str, Any]] = None
-    created_at: Optional[str] = None
-
-
 class ShortMemory(BaseMemory):
-    """Per-run agent context (in-memory); full snapshots persist to sqlite."""
+    """Per-run agent context (in-memory only). Cross-run history uses ConversationMemory."""
 
     memory_type: MemoryType = Field(default=MemoryType.SHORT)
-    db_path: str = Field(default="weakagent.sqlite3")
     max_messages: int = Field(default=100)
 
     run_id: str = Field(default_factory=lambda: f"srun_{uuid.uuid4().hex[:12]}")
@@ -65,240 +48,6 @@ class ShortMemory(BaseMemory):
     )
     compress_turn_threshold: int = Field(default=5)
     max_history_tool_chars: int = Field(default=20000)
-
-    def _init_db(self) -> None:
-        self.ensure_db_parent()
-        with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS short_memory_snapshot (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    snapshot_id TEXT UNIQUE NOT NULL,
-                    run_id TEXT NOT NULL,
-                    session_id TEXT,
-                    user_id TEXT,
-                    agent_type TEXT,
-                    agent_id TEXT,
-                    status TEXT DEFAULT 'completed',
-                    messages TEXT NOT NULL,
-                    messages_count INTEGER DEFAULT 0,
-                    extra TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(run_id)
-                )
-                """
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_short_memory_snapshot_run_id "
-                "ON short_memory_snapshot(run_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_short_memory_snapshot_session_id "
-                "ON short_memory_snapshot(session_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_short_memory_snapshot_created_at "
-                "ON short_memory_snapshot(created_at)"
-            )
-            conn.commit()
-
-    def save_snapshot(
-        self,
-        *,
-        run_id: Optional[str] = None,
-        messages: Optional[List[Message]] = None,
-        extra: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """Persist the full short-memory message list for this run."""
-        msgs = messages if messages is not None else self.messages
-        if not msgs:
-            logger.warning("Skip short memory snapshot save: no messages")
-            return ""
-
-        rid = run_id or self.run_id
-        snapshot_id = f"snap_{uuid.uuid4().hex[:16]}"
-        payload = dict(extra or {})
-        payload.setdefault("cleanup_strategy", self.cleanup_strategy.value)
-
-        messages_json = json.dumps(
-            [m.to_dict() for m in msgs],
-            ensure_ascii=False,
-        )
-
-        with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO short_memory_snapshot(
-                    snapshot_id, run_id, session_id, user_id, agent_type,
-                    agent_id, status, messages, messages_count, extra, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(run_id) DO UPDATE SET
-                    snapshot_id = excluded.snapshot_id,
-                    session_id = excluded.session_id,
-                    user_id = excluded.user_id,
-                    agent_type = excluded.agent_type,
-                    agent_id = excluded.agent_id,
-                    status = excluded.status,
-                    messages = excluded.messages,
-                    messages_count = excluded.messages_count,
-                    extra = excluded.extra,
-                    created_at = excluded.created_at
-                """,
-                (
-                    snapshot_id,
-                    rid,
-                    self.session_id,
-                    self.user_id,
-                    self.agent_type,
-                    self.agent_id,
-                    self.status,
-                    messages_json,
-                    len(msgs),
-                    json.dumps(payload, ensure_ascii=False),
-                    self.utc_now_iso(),
-                ),
-            )
-            conn.commit()
-
-        logger.info(
-            "Short memory snapshot saved run_id=%s messages=%s",
-            rid,
-            len(msgs),
-        )
-        return rid
-
-    @classmethod
-    def _messages_from_json(cls, raw: str) -> List[Message]:
-        data = json.loads(raw or "[]")
-        if not isinstance(data, list):
-            return []
-        out: List[Message] = []
-        for item in data:
-            if isinstance(item, dict):
-                out.append(Message.model_validate(item))
-        return out
-
-    @classmethod
-    def _row_to_entry(cls, row: Any) -> tuple[ShortMemorySnapshotEntry, List[Message]]:
-        try:
-            extra = json.loads(row["extra"] or "{}")
-        except Exception:
-            extra = {}
-        if not isinstance(extra, dict):
-            extra = {}
-        entry = ShortMemorySnapshotEntry(
-            snapshot_id=str(row["snapshot_id"]),
-            run_id=str(row["run_id"]),
-            session_id=row["session_id"],
-            user_id=row["user_id"],
-            agent_type=row["agent_type"],
-            agent_id=row["agent_id"],
-            status=str(row["status"] or "completed"),
-            messages_count=int(row["messages_count"] or 0),
-            extra=extra,
-            created_at=row["created_at"],
-        )
-        messages = cls._messages_from_json(str(row["messages"] or "[]"))
-        return entry, messages
-
-    @classmethod
-    def fetch_snapshot(
-        cls,
-        run_id: str,
-        *,
-        db_path: Optional[str] = None,
-    ) -> Optional[tuple[ShortMemorySnapshotEntry, List[Message]]]:
-        path = str(cls._resolve_db_path(db_path or "weakagent.sqlite3", MemoryType.SHORT))
-        with cls._connect_db(path) as conn:
-            row = conn.execute(
-                """
-                SELECT snapshot_id, run_id, session_id, user_id, agent_type,
-                       agent_id, status, messages, messages_count, extra, created_at
-                FROM short_memory_snapshot
-                WHERE run_id = ?
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (run_id,),
-            ).fetchone()
-        return cls._row_to_entry(row) if row else None
-
-    def load_snapshot(
-        self,
-        run_id: Optional[str] = None,
-        *,
-        clear: bool = True,
-    ) -> List[Message]:
-        """Load a persisted snapshot into ``messages``."""
-        rid = run_id or self.run_id
-        result = self.fetch_snapshot(rid, db_path=self.db_path)
-        if not result:
-            return []
-        _entry, messages = result
-        if clear:
-            self.messages.clear()
-        self.add_messages(messages)
-        return list(self.messages)
-
-    @classmethod
-    def list_snapshots(
-        cls,
-        *,
-        db_path: Optional[str] = None,
-        session_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        limit: int = 20,
-    ) -> List[ShortMemorySnapshotEntry]:
-        path = str(cls._resolve_db_path(db_path or "weakagent.sqlite3", MemoryType.SHORT))
-        query = """
-            SELECT snapshot_id, run_id, session_id, user_id, agent_type,
-                   agent_id, status, messages_count, extra, created_at
-            FROM short_memory_snapshot
-            WHERE 1=1
-        """
-        params: List[Any] = []
-        if session_id:
-            query += " AND session_id = ?"
-            params.append(session_id)
-        if agent_id:
-            query += " AND agent_id = ?"
-            params.append(agent_id)
-        query += " ORDER BY created_at DESC, id DESC LIMIT ?"
-        params.append(max(1, int(limit)))
-
-        with cls._connect_db(path) as conn:
-            rows = conn.execute(query, params).fetchall()
-        entries: List[ShortMemorySnapshotEntry] = []
-        for row in rows:
-            try:
-                extra = json.loads(row["extra"] or "{}")
-            except Exception:
-                extra = {}
-            if not isinstance(extra, dict):
-                extra = {}
-            entries.append(
-                ShortMemorySnapshotEntry(
-                    snapshot_id=str(row["snapshot_id"]),
-                    run_id=str(row["run_id"]),
-                    session_id=row["session_id"],
-                    user_id=row["user_id"],
-                    agent_type=row["agent_type"],
-                    agent_id=row["agent_id"],
-                    status=str(row["status"] or "completed"),
-                    messages_count=int(row["messages_count"] or 0),
-                    extra=extra,
-                    created_at=row["created_at"],
-                )
-            )
-        return entries
-
-    @classmethod
-    def _connect_db(cls, db_path: str):
-        import sqlite3
-
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
 
     # ---- Cleanup helpers ----
     def _keep_system_prefix(self, msgs: List[Message]) -> tuple[list[Message], list[Message]]:
