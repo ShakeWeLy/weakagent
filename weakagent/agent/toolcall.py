@@ -48,7 +48,7 @@ class ToolCallAgent(ReActAgent):
         # 把 NEXT_STEP_PROMPT 改成“仅作为本轮推理的临时消息传给 LLM，不写入 memory”，这样终端里的 Memory Trace 就不会再出现那条伪造的 user 消息。
         request_messages = list(self.messages)
         if self.next_step_prompt:
-            request_messages.append(Message.user_message(self.next_step_prompt))
+            request_messages.append(Message.user_message(self.next_step_prompt.format(task=self.request)))
 
         try:
             # Get response with tool options
