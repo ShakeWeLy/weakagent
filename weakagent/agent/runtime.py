@@ -188,13 +188,12 @@ class AgentRuntime(AgentRunMixin):
             if sess.user_id:
                 conv.user_id = conv.user_id or sess.user_id
 
-        uid = sess.user_id or getattr(agent, "user_id", None) or getattr(
-            agent, "long_memory_user_id", None
-        )
+        uid = agent.user_id or sess.user_id
         if uid:
+            agent.user_id = uid
             sess.user_id = uid
-            if getattr(agent, "long_memory_user_id", None) is None:
-                agent.long_memory_user_id = uid
+            if conv is not None:
+                conv.user_id = uid
             self._agent_long_memory(agent).user_id = uid
 
         try:
@@ -230,9 +229,10 @@ class AgentRuntime(AgentRunMixin):
             )
             return None
 
-        uid = getattr(agent, "long_memory_user_id", None) or sess.user_id
+        uid = agent.user_id or sess.user_id
         long_mem = self._agent_long_memory(agent)
         if uid:
+            agent.user_id = uid
             long_mem.user_id = uid
 
         try:
