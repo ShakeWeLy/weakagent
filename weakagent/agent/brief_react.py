@@ -39,11 +39,10 @@ class BriefReActAgent(ToolCallAgent):
     brief_hink_message_proccess : BriefMessageProccess = Field(default=BriefMessageProccess.NONE)
 
     async def think(self) -> bool:
-
         # get a brief think
         request_messages = list(self.messages)
         if self.think_next_step_prompt:
-            request_messages.append(Message.user_message(self.think_next_step_prompt))
+            request_messages.append(Message.user_message(self.think_next_step_prompt.format(task=self.request)))
         
         try:
             content = await self.llm.ask(
@@ -64,7 +63,7 @@ class BriefReActAgent(ToolCallAgent):
             else:
                 raise ValueError(f"Invalid brief_hink_message_proccess: {self.brief_hink_message_proccess}")
 
-            self.act_next_step_prompt = content
+            # self.act_next_step_prompt = content
         except ValueError:
             raise
         except Exception as e:
@@ -84,9 +83,11 @@ class BriefReActAgent(ToolCallAgent):
 
         # request_messages just use to llm ask, but will not add to memory
         request_messages = list(self.messages)
-        if self.act_next_step_prompt:
-            request_messages.append(Message.user_message(self.act_next_step_prompt))
-
+        # if self.act_next_step_prompt:
+        #     request_messages.append(Message.user_message(self.act_next_step_prompt))
+        if content:
+            request_messages.append(Message.assistant_message(self.act_next_step_prompt))
+        request_messages.append(Message.user_message(self.act_next_step_prompt))
         try:
             # Get response with tool options
             response = await self.llm.ask_tool(

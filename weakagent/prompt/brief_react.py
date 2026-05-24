@@ -37,6 +37,8 @@ Rules:
 
 ACT_NEXT_STEP_PROMPT = """
 Based on the task and the reasoning result, choose the appropriate tool to execute.
+Task:
+{task}
 
 Rules:
 - If a tool is needed, output a tool call only.

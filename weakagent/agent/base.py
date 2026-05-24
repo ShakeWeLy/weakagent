@@ -92,6 +92,7 @@ class BaseAgent(BaseModel, ABC):
         default_factory=lambda: uuid.uuid4().hex[:12],
         description="Agent id for the agent",
     )
+    request: Optional[str] = Field(default=None, description="Current request from user")
     last_request: Optional[str] = Field(default=None)
     last_result: Optional[str] = Field(default=None)
 
@@ -352,6 +353,7 @@ class BaseAgent(BaseModel, ABC):
             self.run_id = uuid.uuid4().hex[:12]
             self.short_memory.run_id = self.run_id
             self.short_memory.flushed_this_run = False
+            self.request = request
         
         # Prune leftover short_memory before a new run (multi-turn runtime loops).
         if self.short_memory.messages:
@@ -366,12 +368,12 @@ class BaseAgent(BaseModel, ABC):
                 logger.warning("Short memory prune before run failed: %s", exc)
 
         # record request immediately.
-        self.update_memory("user", request)
+        self.update_memory("user", self.request)
         self.working_memory.clear_without_system_messages()
 
         # New run begins; if we were previously paused, we are now resuming.
         self.awaiting_human = False
-        self.last_request = request
+        self.last_request = self.request
         self.last_result = None
 
         results: List[str] = []
