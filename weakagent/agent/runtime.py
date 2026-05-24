@@ -5,11 +5,14 @@ from typing import Any, Dict, List, Optional
 
 from weakagent.agent.base import BaseAgent
 from weakagent.agent.factory import AgentFactory
+from weakagent.agent.run_modes import AgentRunMixin
 from weakagent.llm.llm import LLM
-from weakagent.schemas.agent import AgentState
+from weakagent.memory.conversation import ConversationMemory
+from weakagent.memory.long import LongMemory
+from weakagent.memory.session import SessionMemory
 from weakagent.utils.logger import logger
-from weakagent.adapters.input import BaseInputSource, CLIInput
-from weakagent.adapters.output import BaseOutputSource, CLIOutput
+
+
 @dataclass
 class ManagedAgent:
     """Runtime metadata for a managed agent."""
@@ -23,8 +26,11 @@ class ManagedAgent:
     queue_task: Optional[asyncio.Task] = None
 
 
-class AgentRuntime:
+class AgentRuntime(AgentRunMixin):
     """Manage agent runtime lifecycle, registry, and parent/child relationships.
+
+    Session transcript is persisted in :class:`ConversationMemory`; metadata and
+    end-of-loop summaries in :class:`SessionMemory`; long-term facts in :class:`LongMemory`.
 
     This is a singleton - use AgentRuntime.instance() to get the global instance.
     """
@@ -62,6 +68,14 @@ class AgentRuntime:
     @staticmethod
     def _new_agent_id() -> str:
         return f"agent_{uuid.uuid4().hex[:12]}"
+
+    @staticmethod
+    def _agent_long_memory(agent: BaseAgent) -> LongMemory:
+        mem = getattr(agent, "runtime_long_memory", None)
+        if not isinstance(mem, LongMemory):
+            mem = LongMemory()
+            agent.runtime_long_memory = mem
+        return mem
 
     def register(
         self,
@@ -105,11 +119,15 @@ class AgentRuntime:
         load_last_session: bool,
         last_session_messages: int = 10,
     ) -> None:
-        """Optionally reload prior session transcript from conversation store."""
+        """Hydrate in-memory session + short memory from the prior runtime loop.
+
+        Messages are read from :class:`ConversationMemory` for the latest closed
+        session of this ``agent_id`` (not the new empty ``session_id``).
+        """
         if not load_last_session:
             return
         agent = self.get(agent_id)
-        sess = getattr(agent, "session", None)
+        sess = agent.session
         if sess is None:
             return
         if sess.messages:
@@ -119,57 +137,70 @@ class AgentRuntime:
             )
             return
         try:
-            sess.reload_messages()
-            if last_session_messages > 0 and len(sess.messages) > last_session_messages:
-                from weakagent.memory.message_store import select_last_n_messages_with_integrity
-
-                sess.messages = select_last_n_messages_with_integrity(
-                    sess.messages, last_session_messages
+            prior_session_id = SessionMemory.get_last_session_id_for_agent(
+                agent_id,
+                db_path=sess.db_path,
+                exclude_session_id=sess.session_id,
+            )
+            last_n = last_session_messages if last_session_messages > 0 else None
+            if prior_session_id:
+                messages = ConversationMemory.fetch_messages(
+                    db_path=sess.db_path,
+                    session_id=prior_session_id,
+                    agent_id=agent_id,
+                    last_n=last_n,
                 )
+            else:
+                messages = ConversationMemory.fetch_messages(
+                    db_path=sess.db_path,
+                    agent_id=agent_id,
+                    last_n=last_n,
+                )
+            if not messages:
+                return
+            sess.messages = list(messages)
+            agent.short_memory.messages = list(messages)
+            logger.info(
+                "Loaded %s message(s) from prior session for agent_id=%s",
+                len(messages),
+                agent_id,
+            )
         except Exception:
             logger.exception(
                 "Failed to load last session for agent_id=%s", agent_id
             )
 
-        # # RuntimeMemory: hydrate from previous runtime_session sqlite rows.
-        # rm = getattr(agent, "runtime_memory", None)
-        # if rm is None:
-        #     return
-        # if rm.messages:
-        #     return
-        # rm.agent_id = agent_id
-        # rm.load_last_runtime_session(last_n=last_session_messages)
-
     def _wire_session(self, agent: BaseAgent, *, agent_id: str, agent_type: str) -> None:
-        """Bind managed agent metadata to session / conversation / short memory."""
-        sess = getattr(agent, "session", None)
+        """Bind managed agent metadata to session, conversation, short, and long memory."""
+        sess = agent.session
         if sess is None:
             return
+
         sess.agent_id = agent_id
         sess.agent_type = sess.agent_type or agent_type
         agent.short_memory.session_id = sess.session_id
-        conv = getattr(agent, "conversation", None)
+
+        conv = agent.conversation
         if conv is not None:
             conv.session_id = sess.session_id
             conv.agent_id = agent_id
             conv.agent_type = conv.agent_type or agent_type
+            if sess.user_id:
+                conv.user_id = conv.user_id or sess.user_id
+
+        uid = sess.user_id or getattr(agent, "user_id", None) or getattr(
+            agent, "long_memory_user_id", None
+        )
+        if uid:
+            sess.user_id = uid
+            if getattr(agent, "long_memory_user_id", None) is None:
+                agent.long_memory_user_id = uid
+            self._agent_long_memory(agent).user_id = uid
+
         try:
             sess.ensure_session()
         except Exception:
             logger.exception("Failed to ensure session for agent_id=%s", agent_id)
-        uid = getattr(sess, "user_id", None)
-        if uid and getattr(agent, "long_memory_user_id", None) is None:
-            agent.long_memory_user_id = uid
-        if uid:
-            agent.runtime_long_memory.user_id = uid
-
-        # # RuntimeMemory wiring (removed).
-        # rm = getattr(agent, "runtime_memory", None)
-        # if rm is not None:
-        #     rm.agent_id = agent_id
-        #     rm.agent_type = rm.agent_type or agent_type
-        #     rm.session_id = sess.session_id
-        #     rm.ensure_session()
 
     def _wire_runtime_session(
         self, agent: BaseAgent, *, agent_id: str, agent_type: str
@@ -185,10 +216,12 @@ class AgentRuntime:
             return None
         if agent_id not in self._agents:
             return None
+
         agent = self._agents[agent_id].agent
-        sess = getattr(agent, "session", None)
+        sess = agent.session
         if sess is None:
             return None
+
         sess.reload_messages()
         if not sess.messages:
             logger.info(
@@ -196,15 +229,18 @@ class AgentRuntime:
                 agent_id,
             )
             return None
-        uid = getattr(agent, "long_memory_user_id", None) or getattr(sess, "user_id", None)
+
+        uid = getattr(agent, "long_memory_user_id", None) or sess.user_id
+        long_mem = self._agent_long_memory(agent)
         if uid:
-            agent.runtime_long_memory.user_id = uid
+            long_mem.user_id = uid
+
         try:
-            result = await agent.runtime_long_memory.extract_and_save_from_session(
+            result = await long_mem.extract_and_save_from_session(
                 sess,
                 llm=LLM(config_name="fast"),
             )
-            agent.long_memory = agent.runtime_long_memory.to_system_context()
+            agent.long_memory = long_mem.to_system_message()
             if result.get("should_save"):
                 logger.info(
                     "Long memory saved for agent_id=%s type=%s",
@@ -220,12 +256,6 @@ class AgentRuntime:
             )
             return None
 
-        # # RuntimeMemory long-memory extraction (removed).
-        # rm = getattr(agent, "runtime_memory", None)
-        # if rm is None or not rm.messages:
-        #     return None
-        # return await agent.runtime_long_memory.extract_and_save_from_runtime_memory(rm, ...)
-
     async def _finalize_runtime_session(
         self, agent_id: str, *, status: str = "closed"
     ) -> Optional[str]:
@@ -235,9 +265,9 @@ class AgentRuntime:
                 "Skip session finalize: agent_id=%s not in registry", agent_id
             )
             return None
+
         meta = self._agents[agent_id]
-        agent = meta.agent
-        session = getattr(agent, "session", None)
+        session = meta.agent.session
         if session is None:
             return None
 
@@ -249,7 +279,7 @@ class AgentRuntime:
                 llm=LLM(config_name="fast"),
                 extra={
                     "agent_id": agent_id,
-                    "agent_name": getattr(agent, "name", ""),
+                    "agent_name": getattr(meta.agent, "name", ""),
                     "agent_type": meta.agent_type,
                     "source": "runtime_loop_finalize",
                 },
@@ -267,12 +297,6 @@ class AgentRuntime:
                 getattr(session, "session_id", None),
             )
             return None
-
-        # # RuntimeMemory finalize (removed).
-        # rm = getattr(agent, "runtime_memory", None)
-        # if rm is None or not rm.messages:
-        #     return None
-        # return await rm.finalize_session(status=status, run_id=f"loop_{agent_id}", ...)
 
     def create_agent(
         self,
@@ -370,294 +394,6 @@ class AgentRuntime:
             }
             for agent_id, meta in self._agents.items()
         }
-
-    # ===============synchronous mode=================
-    async def run(
-        self,
-        agent_id: str,
-        request: Optional[str] = None,
-        *,
-        input_source: Optional[BaseInputSource] = None,
-        output_source: Optional[BaseOutputSource] = None,
-        emit_output: bool = True,
-        load_last_session: bool = False,
-        last_session_messages: int = 10,
-        use_long_memory: bool = False,
-    ) -> str:
-        """Run an agent synchronously (await until completion)."""
-        self._load_last_runtime_session(
-            agent_id,
-            load_last_session=load_last_session,
-            last_session_messages=last_session_messages,
-        )
-        inp = input_source or CLIInput()
-        out = output_source or CLIOutput()
-        agent = self.get(agent_id)
-        if request:
-            logger.debug(f"User request: {request}")
-        else:
-            request = await inp.read()
-            logger.debug(f"User request: {request}")
-        if not (request or "").strip():
-            return ""
-        result = await agent.run(request=request, use_long_memory=use_long_memory)
-        if emit_output and result:
-            out.dispatch(result)
-        return result
-
-    # ===============background mode=================
-    def run_in_background(
-        self,
-        agent_id: str,
-        request: Optional[str] = None,
-        *,
-        input_source: Optional[BaseInputSource] = None,
-        output_source: Optional[BaseOutputSource] = None,
-        emit_output: bool = False,
-        load_last_session: bool = False,
-        last_session_messages: int = 10,
-        use_long_memory: bool = False,
-    ) -> asyncio.Task[str]:
-        """Schedule ``run()`` on the event loop and return its Task.
-
-        Prefer passing ``request`` explicitly. If omitted, ``run()`` falls back to
-        ``input_source`` (default CLI) inside the background task — rarely desirable
-        for CLI; use ``APIInput`` or a pre-filled request instead.
-        """
-        meta = self.get_meta(agent_id)
-        if meta.task and not meta.task.done():
-            raise RuntimeError(f"agent already running: {agent_id}")
-
-        async def _runner() -> str:
-            return await self.run(
-                agent_id,
-                request=request,
-                input_source=input_source,
-                output_source=output_source,
-                emit_output=emit_output,
-                load_last_session=load_last_session,
-                last_session_messages=last_session_messages,
-                use_long_memory=use_long_memory,
-            )
-
-        task: asyncio.Task[str] = asyncio.create_task(
-            _runner(), name=f"bg-run-{agent_id}"
-        )
-        meta.task = task
-
-        def _clear_task_ref(t: asyncio.Task[str]) -> None:
-            if meta.task is t:
-                meta.task = None
-
-        task.add_done_callback(_clear_task_ref)
-        return task
-    
-    # ===============interactive mode=================
-    async def run_loop(
-        self,
-        agent_id: str,
-        request: Optional[str] = None,
-        *,
-        input_source: Optional[BaseInputSource] = None,
-        output_source: Optional[BaseOutputSource] = None,
-        load_last_session: bool = True,
-        last_session_messages: int = 10,
-        use_long_memory: bool = False,
-    ):
-        """Interactive loop: read via input_source until exit/quit/q."""
-        self._load_last_runtime_session(
-            agent_id,
-            load_last_session=load_last_session,
-            last_session_messages=last_session_messages,
-        )
-        inp = input_source or CLIInput()
-        out = output_source or CLIOutput()
-        pending: Optional[str] = request
-        try:
-            while True:
-                if pending is not None:
-                    current = pending
-                    pending = None
-                else:
-                    current = await inp.read()
-                logger.debug(f"User request: {current}")
-
-                if not (current or "").strip():
-                    continue
-                if current.lower() in {"exit", "quit", "q"}:
-                    break
-                await self.run(
-                    agent_id,
-                    request=current,
-                    input_source=inp,
-                    output_source=out,
-                    use_long_memory=use_long_memory,
-                )
-        finally:
-            await self._finalize_runtime_session(agent_id)
-            await self._finalize_long_memory(agent_id, use_long_memory=use_long_memory)
-            await self.cleanup(agent_id)
-            logger.info("Cleanup complete.")
-    
-    # ===============queue mode=================
-    # Producer: put_request() at any time (main thread, scheduler thread, stdin, HTTP, ...).
-    # Consumer: start_queue_loop() runs a long-lived task that takes one request at a time,
-    # runs agent.run() (LLM / tools), pushes the result, then immediately takes the next
-    # queued request if the queue is not empty.
-    def run_queue_loop(
-        self,
-        agent_id: str,
-        *,
-        load_last_session: bool = False,
-        last_session_messages: int = 10,
-        use_long_memory: bool = False,
-    ) -> asyncio.Task:
-        """Start the queue consumer in the background if not already running."""
-        meta = self.get_meta(agent_id)
-        if meta.queue_task and not meta.queue_task.done():
-            return meta.queue_task
-        meta.queue_task = asyncio.create_task(
-            self.run_loop_async(
-                agent_id,
-                load_last_session=load_last_session,
-                last_session_messages=last_session_messages,
-                use_long_memory=use_long_memory,
-            ),
-            name=f"queue-loop-{agent_id}",
-        )
-        logger.info("Queue loop started for agent_id=%s", agent_id)
-        return meta.queue_task
-
-    def put_request(self, request: str) -> None:
-        """Enqueue one request (thread-safe). Ignores blank strings."""
-        text = (request or "").strip()
-        if not text:
-            return
-        loop = self._loop
-        if loop is None:
-            self.request_queue.put_nowait(text)
-            return
-        try:
-            running = asyncio.get_running_loop()
-        except RuntimeError:
-            running = None
-        if running is loop:
-            self.request_queue.put_nowait(text)
-        else:
-            asyncio.run_coroutine_threadsafe(self.request_queue.put(text), loop)
-
-    async def get_result(self) -> str:
-        """Await the next result (FIFO, one per processed request)."""
-        return await self.result_queue.get()
-
-    def start_queue_loop(
-        self,
-        agent_id: str,
-        *,
-        load_last_session: bool = False,
-        last_session_messages: int = 10,
-        use_long_memory: bool = False,
-    ) -> asyncio.Task:
-        """Start the queue consumer in the background if not already running."""
-        return self.run_queue_loop(
-            agent_id,
-            load_last_session=load_last_session,
-            last_session_messages=last_session_messages,
-            use_long_memory=use_long_memory,
-        )
-    
-    async def stop_queue_loop(self, agent_id: str) -> None:
-        """Stop the queue consumer by enqueueing exit and awaiting its task."""
-        meta = self.get_meta(agent_id)
-        if not meta.queue_task or meta.queue_task.done():
-            return
-        self.put_request("exit")
-        try:
-            await meta.queue_task
-        except asyncio.CancelledError:
-            pass
-        meta.queue_task = None
-
-    def is_queue_loop_running(self, agent_id: str) -> bool:
-        meta = self.get_meta(agent_id)
-        return meta.queue_task is not None and not meta.queue_task.done()
-
-    async def _process_one_request(
-        self,
-        agent_id: str,
-        request: str,
-        *,
-        use_long_memory: bool = False,
-    ) -> str:
-        """Run a single queued request and return the agent output."""
-        meta = self.get_meta(agent_id)
-        meta.agent.current_step = 0
-        meta.agent.state = AgentState.IDLE
-        return await self.run(
-            agent_id,
-            request=request,
-            use_long_memory=use_long_memory,
-        )
-
-    async def run_loop_async(
-        self,
-        agent_id: str,
-        *,
-        load_last_session: bool = False,
-        last_session_messages: int = 10,
-        use_long_memory: bool = False,
-    ) -> None:
-        """Consume request_queue: one request -> one run -> one result; drain backlog."""
-        self._load_last_runtime_session(
-            agent_id,
-            load_last_session=load_last_session,
-            last_session_messages=last_session_messages,
-        )
-        try:
-            while True:
-                request = await self.request_queue.get()
-                while request is not None:
-                    if request.lower() in {"exit", "quit", "q"}:
-                        return
-                    logger.info("Queue processing request (len=%s)", len(request))
-                    result = await self._process_one_request(
-                        agent_id,
-                        request,
-                        use_long_memory=use_long_memory,
-                    )
-                    await self.result_queue.put(result)
-                    try:
-                        request = self.request_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        request = None
-        finally:
-            await self._finalize_runtime_session(agent_id)
-            await self._finalize_long_memory(agent_id, use_long_memory=use_long_memory)
-            try:
-                meta = self.get_meta(agent_id)
-                meta.queue_task = None
-            except KeyError:
-                pass
-            logger.info("run_loop_async finished for agent_id=%s", agent_id)
-
-
-    async def cancel(self, agent_id: str) -> bool:
-        """Cancel background task of an agent if running."""
-        meta = self.get_meta(agent_id)
-        if not meta.task or meta.task.done():
-            return False
-
-        meta.task.cancel()
-        try:
-            await meta.task
-        except asyncio.CancelledError:
-            logger.info(f"Cancelled agent task: {agent_id}")
-        except Exception as exc:
-            logger.warning(f"Agent task ended with error after cancel: {exc}")
-        finally:
-            meta.task = None
-        return True
-
 
     async def cleanup(self, agent_id: str, *, recursive: bool = True) -> None:
         """Cancel tasks, cleanup resources, and remove agent from registry."""
