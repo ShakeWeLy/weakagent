@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Union, overload
 
 from pydantic import Field
 
@@ -15,6 +15,8 @@ from weakagent.schemas.agent import AgentState
 from weakagent.schemas.message import Message
 from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate, WebSearch
 from weakagent.tools.special_tool.ask_human import AskHumanTool
+from weakagent.tools.base import BaseTool
+from weakagent.tools.tool import AddToolTool, ListToolsTool
 
 TOOL_CALL_REQUIRED = "Tool calls required but none provided"
 logger = get_logger(__name__)
@@ -30,7 +32,12 @@ class ToolCallAgent(ReActAgent):
     next_step_prompt: str = NEXT_STEP_PROMPT
 
     available_tools: ToolCollection = ToolCollection(
-        CreateChatCompletion(), WebSearch(), AskHumanTool(), Terminate()
+        CreateChatCompletion(),
+        WebSearch(),
+        AskHumanTool(),
+        Terminate(),
+        ListToolsTool(),
+        AddToolTool(),
     )
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
     special_tool_names: List[str] = Field(
@@ -217,16 +224,12 @@ class ToolCallAgent(ReActAgent):
                 },
             )
             t0 = time.perf_counter()
-            if name == "save_long_memory":
-                from weakagent.tools.memory.long import SaveLongMemoryTool
-
-                tool = self.available_tools.get_tool(name)
-                if isinstance(tool, SaveLongMemoryTool):
-                    result = await tool.execute_for_agent(self, **args)
-                else:
-                    result = await self.available_tools.execute(
-                        name=name, tool_input=args
-                    )
+            tool = self.available_tools.get_tool(name)
+            execute_for_agent = (
+                getattr(tool, "execute_for_agent", None) if tool is not None else None
+            )
+            if callable(execute_for_agent):
+                result = await execute_for_agent(self, **args)
             else:
                 result = await self.available_tools.execute(
                     name=name, tool_input=args
@@ -308,6 +311,40 @@ class ToolCallAgent(ReActAgent):
             # Set agent state to finished
             logger.info(f"🏁 Special tool '{name}' has completed the task!")
             self.state = AgentState.FINISHED
+
+    @overload
+    async def add_tool_dynamically(self, tool: str) -> BaseTool: ...
+
+    @overload
+    async def add_tool_dynamically(self, tool: BaseTool) -> BaseTool: ...
+
+    async def add_tool_dynamically(self, tool: Union[BaseTool, str]) -> BaseTool:
+        """Mount a tool at runtime (instance or built-in registry name).
+
+        Args:
+            tool: A :class:`BaseTool` instance, or a built-in tool name from
+                :meth:`ToolCollection.add_tool_by_name`.
+
+        Returns:
+            The mounted tool instance.
+
+        Raises:
+            ValueError: When *tool* is a name that cannot be resolved or instantiated.
+        """
+        if isinstance(tool, str):
+            mounted = self.available_tools.add_tool_by_name(tool)
+            if mounted is None:
+                raise ValueError(f"Unknown or failed to load built-in tool: {tool!r}")
+            logger.info("Dynamically mounted tool %s", mounted.name)
+            return mounted
+
+        if tool.name in self.available_tools.tool_map:
+            logger.info("Tool %s already mounted", tool.name)
+            return self.available_tools.tool_map[tool.name]
+
+        self.available_tools.add_tool(tool)
+        logger.info("Dynamically mounted tool %s", tool.name)
+        return tool
 
     @staticmethod
     def _should_finish_execution(**kwargs) -> bool:
