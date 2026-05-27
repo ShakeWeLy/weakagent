@@ -18,3 +18,4 @@ config.toml
 *.log
 
 workspace/
+./config.toml

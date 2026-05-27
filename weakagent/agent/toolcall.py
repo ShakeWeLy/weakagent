@@ -16,7 +16,7 @@ from weakagent.schemas.message import Message
 from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate, WebSearch
 from weakagent.tools.special_tool.ask_human import AskHumanTool
 from weakagent.tools.base import BaseTool
-from weakagent.tools.tool import AddToolTool, HotReloadTool, ListToolsTool
+from weakagent.tools.tool import HotReloadTool, ListToolsTool
 
 TOOL_CALL_REQUIRED = "Tool calls required but none provided"
 logger = get_logger(__name__)
@@ -37,7 +37,6 @@ class ToolCallAgent(ReActAgent):
         AskHumanTool(),
         Terminate(),
         ListToolsTool(),
-        AddToolTool(),
         HotReloadTool(),
     )
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
