@@ -47,7 +47,7 @@ class BriefReActAgent(ToolCallAgent):
         try:
             content = await self.llm.ask(
                 messages=request_messages,
-                system_msgs= [self.think_system_prompt] + self.system_messages,
+                system_msgs=[Message.system_message(self.think_system_prompt)] + self.system_messages,
                 temperature=0.0,
                 verbose=self.verbose,
             )
@@ -92,7 +92,7 @@ class BriefReActAgent(ToolCallAgent):
             # Get response with tool options
             response = await self.llm.ask_tool(
                 messages=request_messages,
-                system_msgs=[self.act_system_prompt] + self.system_messages,
+                system_msgs=[Message.system_message(self.act_system_prompt)] + self.system_messages,
                 tools=self.available_tools.to_params(),
                 tool_choice=self.tool_choices,
                 verbose=self.verbose,

@@ -220,6 +220,7 @@ async def run_interactive_loop(
         name="full_demo_agent",
         llm=LLM(config_name="fast"),
         user_id=user_id,
+        use_long_memory=use_long_memory,
     )
     agent = runtime.get(agent_id)
     assert isinstance(agent, FullDemoAgent)
@@ -247,7 +248,6 @@ async def run_interactive_loop(
             output_source=CLIOutput(),
             load_last_session=load_last_session,
             last_session_messages=last_session_messages,
-            use_long_memory=use_long_memory,
         )
     except Exception:
         logger.exception("Failed to run interactive loop")
@@ -282,7 +282,7 @@ async def main() -> None:
     parser.add_argument(
         "--use-long-memory",
         action="store_true",
-        help="Inject long memory each run; extract from session on loop exit",
+        help="Enable long memory on agent init; extract from session on loop exit",
     )
     parser.add_argument(
         "--user-id",

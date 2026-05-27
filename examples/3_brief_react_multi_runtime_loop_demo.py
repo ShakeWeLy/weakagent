@@ -81,6 +81,7 @@ async def run_interactive_loop(
         max_steps=6,
         summarize_short_memory=True,
         user_id=user_id,
+        use_long_memory=use_long_memory,
     )
 
     print("Interactive BriefReActMultiAgent (AgentRuntime.run_loop).")
@@ -92,7 +93,6 @@ async def run_interactive_loop(
             request=first_request,
             load_last_session=load_last_session,
             last_session_messages=last_session_messages,
-            use_long_memory=use_long_memory,
         )
     except Exception:
         logger.exception("Failed to run interactive loop")

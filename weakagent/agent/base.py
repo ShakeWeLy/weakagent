@@ -160,23 +160,26 @@ class BaseAgent(BaseModel, ABC):
                     session_id=self.session_id,
                     )
 
+            self.system_messages = []
             if self.system_prompt:
                 self.system_messages.append(Message.system_message(self.system_prompt))
 
-            # add additonal system messages
             if self.use_long_memory:
                 if self.long_memory is None:
                     self.long_memory = LongMemory(user_id=self.user_id)
                 else:
                     self.long_memory.user_id = self.user_id
                 self.long_memory.load_for_user(self.user_id)
-                self.system_messages.append(self.long_memory.message)
+                ctx = self.long_memory.to_system_context()
+                if ctx:
+                    self.system_messages.append(self.long_memory.message)
 
             # add skills prompt
             if self.skills_enabled:
                 mgr = self.get_skill_manager()
                 block = mgr.build_skills_prompt(skill_filter=self.skill_filter)
-                self.system_messages.append(Message.system_message(block))
+                if block.strip():
+                    self.system_messages.append(Message.system_message(block))
 
             return self
         except Exception:
@@ -330,14 +333,12 @@ class BaseAgent(BaseModel, ABC):
         self,
         request: Optional[str] = None,
         *,
-        use_long_memory: bool = False,
-        only_save_last_result_to_short: bool = False,
+        only_save_last_result_to_short: Optional[bool] = None,
     ) -> str:
         """Execute the agent's main loop asynchronously.
 
         Args:
             request: Optional initial user request to process.
-            use_long_memory: If True, inject stored long_memory into short_memory.
 
         Returns:
             A string summarizing the execution results.
@@ -347,7 +348,9 @@ class BaseAgent(BaseModel, ABC):
         """
         if self.state != AgentState.IDLE:
             raise RuntimeError(f"Cannot run agent from state: {self.state}")
-        
+        if only_save_last_result_to_short is not None:
+            self.only_save_last_result_to_short = only_save_last_result_to_short
+
         # reset run_id, keep run_id for awaiting_human
         if not self.awaiting_human:
             self.run_id = uuid.uuid4().hex[:12]

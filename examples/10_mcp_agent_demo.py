@@ -115,7 +115,7 @@ async def run_interactive_loop(
         first_request: Optional first user message (skips first You> prompt).
         load_last_session: Hydrate short/session memory from the prior sqlite session.
         last_session_messages: How many prior messages to load (-1 = all).
-        use_long_memory: Inject long memory each turn; extract on loop exit.
+        use_long_memory: Enable long memory on agent init; extract on loop exit.
         user_id: agent.user_id for session, conversation, and long_term_memory rows.
     """
     mcp_settings = load_mcp_settings()
@@ -140,6 +140,7 @@ async def run_interactive_loop(
         name="runtime_skills_mcp_agent",
         llm=LLM(config_name="fast"),
         user_id=user_id,
+        use_long_memory=use_long_memory,
     )
     agent = runtime.get(agent_id)
     assert isinstance(agent, RuntimeSkillsMCPAgent)
@@ -160,7 +161,6 @@ async def run_interactive_loop(
             request=first_request,
             load_last_session=load_last_session,
             last_session_messages=last_session_messages,
-            use_long_memory=use_long_memory,
         )
     except Exception:
         logger.exception("Failed to run interactive loop")
@@ -194,7 +194,7 @@ async def main() -> None:
     parser.add_argument(
         "--use-long-memory",
         action="store_true",
-        help="Inject long memory each run; extract from session on loop exit",
+        help="Enable long memory on agent init; extract from session on loop exit",
     )
     parser.add_argument(
         "--user-id",

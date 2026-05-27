@@ -371,11 +371,9 @@ class ToolCallAgent(ReActAgent):
     async def run(
         self,
         request: Optional[str] = None,
-        *,
-        use_long_memory: bool = False,
     ) -> str:
         """Run the agent with cleanup when done."""
         try:
-            return await super().run(request, use_long_memory=use_long_memory)
+            return await super().run(request)
         finally:
             await self.cleanup()

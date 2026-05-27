@@ -34,8 +34,14 @@ def _source_message_from_agent(agent: BaseAgent) -> Optional[str]:
     return (last or "").strip()[:2000] or None
 
 
+def _is_long_memory_system_message(content: str) -> bool:
+    return (content or "").startswith("[Long-term memory]")
+
+
 def _refresh_agent_long_memory(agent: BaseAgent, long_mem: LongMemory) -> None:
-    """Reload injected long-memory context when use_long_memory is enabled."""
+    """Reload long-memory context into agent.system_messages when enabled."""
+    from weakagent.schemas.message import Message
+
     agent.runtime_long_memory = long_mem
     if not getattr(agent, "use_long_memory", False):
         return
@@ -45,17 +51,21 @@ def _refresh_agent_long_memory(agent: BaseAgent, long_mem: LongMemory) -> None:
         long_mem.load_for_user(long_mem.user_id)
     ctx = long_mem.to_system_context()
     if not ctx:
+        agent.system_messages = [
+            msg
+            for msg in agent.system_messages
+            if not _is_long_memory_system_message(msg.content or "")
+        ]
+        agent.long_memory_message = None
         return
-    from weakagent.schemas.message import Message
 
-    agent.long_memory_message = Message.system_message(ctx)
-    messages = agent.short_memory.messages
-    if messages and messages[0].role == "system" and (
-        messages[0].content or ""
-    ).startswith("[Long-term memory]"):
-        messages[0] = agent.long_memory_message
-    else:
-        agent.short_memory.messages.insert(0, agent.long_memory_message)
+    new_msg = Message.system_message(ctx)
+    agent.long_memory_message = new_msg
+    for i, msg in enumerate(agent.system_messages):
+        if _is_long_memory_system_message(msg.content or ""):
+            agent.system_messages[i] = new_msg
+            return
+    agent.system_messages.append(new_msg)
 
 
 class SaveLongMemoryTool(BaseTool):

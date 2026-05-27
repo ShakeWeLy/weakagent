@@ -207,16 +207,14 @@ class AgentRuntime(AgentRunMixin):
         """Alias for ``_wire_session`` (kept for compatibility)."""
         self._wire_session(agent, agent_id=agent_id, agent_type=agent_type)
 
-    async def _finalize_long_memory(
-        self, agent_id: str, *, use_long_memory: bool = False
-    ) -> Optional[dict]:
+    async def _finalize_long_memory(self, agent_id: str) -> Optional[dict]:
         """Extract and persist long-term memory from session transcript on loop exit."""
-        if not use_long_memory:
-            return None
         if agent_id not in self._agents:
             return None
 
         agent = self._agents[agent_id].agent
+        if not getattr(agent, "use_long_memory", False):
+            return None
         sess = agent.session
         if sess is None:
             return None
@@ -240,7 +238,9 @@ class AgentRuntime(AgentRunMixin):
                 sess,
                 llm=LLM(config_name="fast"),
             )
-            agent.long_memory = long_mem.to_system_message()
+            from weakagent.tools.memory.long import _refresh_agent_long_memory
+
+            _refresh_agent_long_memory(agent, long_mem)
             if result.get("should_save"):
                 logger.info(
                     "Long memory saved for agent_id=%s type=%s",
