@@ -437,11 +437,11 @@ class BaseAgent(BaseModel, ABC):
             self.run_id = uuid.uuid4().hex[:12]
             self.short_memory.run_id = self.run_id
             self.short_memory.flushed_this_run = False
-            self.request = request
             self.current_step = 0
             self.state = AgentState.IDLE
             # In-memory once-per-session guard; no DB read on later runs.
             self._persist_system_messages()
+        self.request = request
         
         # Prune leftover short_memory before a new run (multi-turn runtime loops).
         if self.short_memory.messages:
