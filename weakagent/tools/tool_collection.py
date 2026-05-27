@@ -184,6 +184,30 @@ class ToolCollection:
         self.add_tool(tool)
         return tool
 
+    def remount_tool_by_name(self, name: str, *, refresh_registry: bool = False) -> Optional[BaseTool]:
+        """Re-instantiate a built-in tool by name and replace the mounted instance."""
+        key = (name or "").strip()
+        if not key:
+            return None
+
+        registry = get_builtin_tool_registry(refresh=refresh_registry)
+        tool_cls = registry.get(key)
+        if tool_cls is None:
+            logger.warning("Tool %s not found in built-in registry for remount", key)
+            return None
+
+        try:
+            tool = tool_cls()
+        except Exception as exc:
+            logger.warning("Failed to remount tool %s: %s", key, exc)
+            return None
+
+        if key in self.tool_map:
+            self.add_tool(tool, replace=True)
+        else:
+            self.add_tool(tool)
+        return self.tool_map.get(key)
+
     def add_tool(self, tool: BaseTool, *, replace: bool = False) -> "ToolCollection":
         """Add a single tool to the collection.
 
