@@ -54,6 +54,7 @@ from weakagent.scheduler.executors import DailySummaryExecutor, WeeklyReportExec
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolChoice
 from weakagent.skills.manager import SkillManager
 from weakagent.tools import ToolCollection, Terminate
+from weakagent.tools.tool import HotReloadTool
 from weakagent.tools.scheduler import (
     CreateTaskTool,
     DeleteTaskTool,
@@ -127,6 +128,7 @@ class FullDemoAgent(ToolCallAgent):
         GetTaskTool(),
         UpdateTaskTool(),
         DeleteTaskTool(),
+        HotReloadTool(),
     )
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
     special_tool_names: List[str] = Field(
@@ -270,7 +272,8 @@ async def main() -> None:
     )
     parser.add_argument(
         "--load-last-session",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Load raw messages from the previous runtime session (default: last 10)",
     )
     parser.add_argument(
@@ -281,8 +284,9 @@ async def main() -> None:
     )
     parser.add_argument(
         "--use-long-memory",
-        action="store_true",
-        help="Enable long memory on agent init; extract from session on loop exit",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable long memory on agent init (default: on); use --no-use-long-memory to disable",
     )
     parser.add_argument(
         "--user-id",

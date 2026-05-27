@@ -74,8 +74,8 @@ class SaveLongMemoryTool(BaseTool):
     name: str = "save_long_memory"
     description: str = (
         "Persist a concise long-term memory about the user (identity, preferences, "
-        "projects, stack, goals). Uses the current agent's user_id and the latest user "
-        "message from short_memory as context. Skips exact duplicates for the same user."
+        "projects, stack, goals). Works standalone (no agent context required) or via "
+        "agent tool loop. Skips exact duplicates for the same user."
     )
     parameters: dict = {
         "type": "object",
@@ -108,9 +108,39 @@ class SaveLongMemoryTool(BaseTool):
         memory_type: str = "general",
         importance: float = 0.75,
     ) -> ToolExecutionResult:
-        return self.fail_response(
-            "save_long_memory must run inside an agent tool loop "
-            "(use execute_for_agent)."
+        """Standalone execution — saves directly to the sqlite long-term memory store.
+
+        Does NOT require an agent context. Useful for manual / scripted memory writes.
+        """
+        text = (memory or "").strip()
+        if not text:
+            return self.fail_response("`memory` must be a non-empty string.")
+
+        try:
+            long_mem = LongMemory()
+            entry = long_mem.add_entry(
+                content=text,
+                memory_type=(memory_type or "general").strip() or "general",
+                importance=importance,
+                source_message="[manual write via save_long_memory tool]",
+            )
+        except Exception as exc:
+            return self.fail_response(f"Failed to write long-term memory: {exc}")
+
+        if entry is None:
+            return self.fail_response(
+                "Long-term memory was not saved (empty content or duplicate)."
+            )
+
+        payload: Dict[str, Any] = {
+            "memory_id": entry.memory_id,
+            "memory_type": entry.memory_type,
+            "importance": entry.importance,
+            "content": entry.content,
+        }
+        return self.success_response(
+            f"Long-term memory saved (id={entry.memory_id}, type={entry.memory_type}, "
+            f"importance={entry.importance:.2f})."
         )
 
     async def execute_for_agent(

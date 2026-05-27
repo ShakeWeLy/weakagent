@@ -281,8 +281,9 @@ async def main() -> None:
     )
     parser.add_argument(
         "--use-long-memory",
-        action="store_true",
-        help="Enable long memory on agent init; extract from session on loop exit",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable long memory on agent init (default: on); use --no-use-long-memory to disable",
     )
     parser.add_argument(
         "--user-id",
