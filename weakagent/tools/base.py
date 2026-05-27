@@ -15,9 +15,9 @@ class ToolExecutionResult(BaseModel):
     """Result of running a tool (execution layer)."""
 
     success: bool = True
-    output: Optional[str] = None
-    error: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
+    output: Optional[str] = None  # give the result to agent
+    error: Optional[str] = None  # give the error to agent
+    data: Optional[Dict[str, Any]] = None  
 
     @classmethod
     def ok(
