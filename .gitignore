@@ -8,3 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+config.toml
+
+# data
+*.sqlite3
+*.png
+*.jpg
+*.jpeg
+*.log
