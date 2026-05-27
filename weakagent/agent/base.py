@@ -569,8 +569,9 @@ class BaseAgent(BaseModel, ABC):
 
                     if self.summarize_working_memory:
                         threading.Thread(
-                            target=self.working_memory.summarize_and_save,
-                            args=(self.run_id,),
+                            target=self.working_memory.summarize_and_save_sync,
+                            kwargs={"run_id": self.run_id},
+                            daemon=True,
                         ).start()
 
             except Exception:

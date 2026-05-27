@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import Any, Dict, List, Optional
@@ -101,6 +102,22 @@ class WorkingMemory(BaseMemory):
             llm=llm,
             extra=extra,
         )
+
+    def summarize_and_save_sync(
+        self,
+        *,
+        llm: Optional[LLM] = None,
+        run_id: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Sync entry point for background threads (wraps ``summarize_and_save``)."""
+        try:
+            return asyncio.run(
+                self.summarize_and_save(llm=llm, run_id=run_id, extra=extra)
+            )
+        except Exception:
+            logger.exception("Working memory summarize_and_save failed run_id=%s", run_id)
+            return ""
 
     def save_summary(
         self,
