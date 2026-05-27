@@ -117,6 +117,14 @@ class ShortMemory(BaseMemory):
             conn.commit()
 
     @classmethod
+    def _connect_db(cls, db_path: str):
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    @classmethod
     def _messages_from_json(cls, raw: str) -> List[Message]:
         data = json.loads(raw or "[]")
         if not isinstance(data, list):
@@ -221,14 +229,10 @@ class ShortMemory(BaseMemory):
         )
         return rid
 
-    @classmethod
-    def _connect_db(cls, db_path: str):
-        import sqlite3
 
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
+    #--------------------------------------------
+    # Cleanup helpers
+    #--------------------------------------------
     def needs_flush(self) -> bool:
         """True when in-memory messages exceed ``max_messages``."""
         return (
@@ -300,7 +304,6 @@ class ShortMemory(BaseMemory):
         finally:
             self.flushed_this_run = False
 
-    # ---- Cleanup helpers ----
     def _keep_system_prefix(self, msgs: List[Message]) -> tuple[list[Message], list[Message]]:
         sys_prefix: list[Message] = []
         rest: list[Message] = []

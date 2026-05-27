@@ -5,30 +5,9 @@ from weakagent.memory.message_store import flatten_messages_for_summary
 from weakagent.prompt.summary import (
     load_short_memory_summary_system_prompt,
     load_working_memory_summary_system_prompt,
+    load_long_memory_summary_system_prompt,
 )
 from weakagent.schemas.message import Message
-
-
-async def summarize_working_memory(llm: LLM, working_memory: List[Message]) -> Message:
-    """Extract reusable skills/workflows from working-memory messages."""
-    content = await llm.ask(
-        messages=flatten_messages_for_summary(working_memory),
-        system_msgs=[Message.system_message(load_working_memory_summary_system_prompt())],
-        stream=False,
-    )
-    return Message.assistant_message(content or "")
-
-
-async def summarize_short_memory(llm: LLM, short_memory: List[Message]) -> Message:
-    """Compress short-memory messages into a structured conversation summary."""
-    if not short_memory:
-        return Message.assistant_message("")
-    content = await llm.ask(
-        messages=flatten_messages_for_summary(short_memory),
-        system_msgs=[Message.system_message(load_short_memory_summary_system_prompt())],
-        stream=False,
-    )
-    return Message.assistant_message(content or "")
 
 
 SESSION_TITLE_SYSTEM_PROMPT = """
@@ -47,54 +26,34 @@ User's first message:
 Session title:
 """
 
-LONG_MEMORY_SUMMARY_SYSTEM_PROMPT = """
-You are a Long-Term Memory Extractor for an AI Agent.
-
-Your task:
-Determine whether the user's message contains information worth storing as long-term memory.
-
-Definition of long-term memory:
-Information that may still influence the AI assistant's behavior, response style, tool usage, or decision-making weeks or months later.
-
-Information worth saving includes:
-- User identity / profession / domain
-- Long-term projects
-- Technical stack
-- User preferences
-- Work habits
-- Long-term goals
-- Important confirmed decisions
-
-Do NOT save:
-- Temporary questions
-- One-time errors
-- Current weather/location
-- Casual small talk
-- Short-term conversational context
-
-Output JSON only:
-
-{
-  "should_save": true,
-  "memory_type": "project",
-  "importance": 0.82,
-  "memory": "User is developing a YOLO pruning system"
-}
-
-Requirements:
-- Output JSON only
-- If not worth saving:
-{
-  "should_save": false
-}
-- The memory field must be concise, structured, and deduplicated
-- Do not copy the user's full original message
-"""
 
 LONG_MEMORY_USER_PROMPT = """
 User message:
 {user_message}
 """
+
+async def summarize_working_memory(llm: LLM, working_memory: List[Message]) -> Message:
+    """Extract reusable skills/workflows from working-memory messages."""
+    content = await llm.ask(
+        messages=flatten_messages_for_summary(working_memory),
+        system_msgs=[Message.system_message(load_working_memory_summary_system_prompt())],
+        stream=False,
+        verbose=True,
+    )
+    return Message.assistant_message(content or "")
+
+
+async def summarize_short_memory(llm: LLM, short_memory: List[Message]) -> Message:
+    """Compress short-memory messages into a structured conversation summary."""
+    if not short_memory:
+        return Message.assistant_message("")
+    content = await llm.ask(
+        messages=flatten_messages_for_summary(short_memory),
+        system_msgs=[Message.system_message(load_short_memory_summary_system_prompt())],
+        stream=False,
+        verbose=True,
+    )
+    return Message.assistant_message(content or "")
 
 
 def normalize_long_memory_result(data: Optional[dict]) -> dict:
@@ -136,8 +95,9 @@ async def extract_long_memory(llm: LLM, user_message: str) -> dict:
 
     content = await llm.ask(
         [Message.user_message(LONG_MEMORY_USER_PROMPT.format(user_message=text))],
-        system_msgs=[Message.system_message(LONG_MEMORY_SUMMARY_SYSTEM_PROMPT)],
+        system_msgs=[Message.system_message(load_long_memory_summary_system_prompt())],
         stream=False,
+        verbose=True,
     )
     raw = parse_llm_json_dict(content or "")
     return normalize_long_memory_result(raw)
@@ -149,5 +109,6 @@ async def generate_session_title(llm: LLM, request: str) -> str:
         [Message.user_message(SESSION_TITLE_USER_PROMPT.format(request=request))],
         system_msgs=[Message.system_message(SESSION_TITLE_SYSTEM_PROMPT)],
         stream=False,
+        verbose=True,
     )
     return (content or "").strip()

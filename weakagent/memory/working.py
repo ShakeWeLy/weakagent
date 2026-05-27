@@ -166,89 +166,9 @@ class WorkingMemory(BaseMemory):
         return text
 
     @classmethod
-    def _row_to_entry(cls, row: Any) -> WorkingMemorySummaryEntry:
-        try:
-            extra = json.loads(row["extra"] or "{}")
-        except Exception:
-            extra = {}
-        if not isinstance(extra, dict):
-            extra = {}
-        return WorkingMemorySummaryEntry(
-            summary_id=str(row["summary_id"]),
-            run_id=str(row["run_id"]),
-            source_session_id=row["source_session_id"],
-            user_id=row["user_id"],
-            agent_type=row["agent_type"],
-            agent_id=row["agent_id"],
-            status=str(row["status"] or "completed"),
-            summary=str(row["summary"] or ""),
-            messages_count=int(row["messages_count"] or 0),
-            extra=extra,
-            created_at=row["created_at"],
-        )
-
-    @classmethod
-    def fetch_summary(
-        cls,
-        run_id: str,
-        *,
-        db_path: Optional[str] = None,
-        agent_id: Optional[str] = None,
-    ) -> Optional[WorkingMemorySummaryEntry]:
-        path = str(cls._resolve_db_path(db_path or "weakagent.sqlite3", MemoryType.WORKING))
-        query = """
-            SELECT summary_id, run_id, source_session_id, user_id, agent_type,
-                   agent_id, status, summary, messages_count, extra, created_at
-            FROM working_memory_summary
-            WHERE run_id = ?
-        """
-        params: List[Any] = [run_id]
-        if agent_id is not None:
-            query += " AND agent_id = ?"
-            params.append(agent_id)
-        query += " ORDER BY id DESC LIMIT 1"
-
-        with cls._connect_db(path) as conn:
-            row = conn.execute(query, params).fetchone()
-        return cls._row_to_entry(row) if row else None
-
-    @classmethod
-    def list_summaries(
-        cls,
-        *,
-        db_path: Optional[str] = None,
-        source_session_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        limit: int = 20,
-    ) -> List[WorkingMemorySummaryEntry]:
-        path = str(cls._resolve_db_path(db_path or "weakagent.sqlite3", MemoryType.WORKING))
-        query = """
-            SELECT summary_id, run_id, source_session_id, user_id, agent_type,
-                   agent_id, status, summary, messages_count, extra, created_at
-            FROM working_memory_summary
-            WHERE 1=1
-        """
-        params: List[Any] = []
-        if source_session_id:
-            query += " AND source_session_id = ?"
-            params.append(source_session_id)
-        if agent_id:
-            query += " AND agent_id = ?"
-            params.append(agent_id)
-        query += " ORDER BY created_at DESC, id DESC LIMIT ?"
-        params.append(max(1, int(limit)))
-
-        with cls._connect_db(path) as conn:
-            rows = conn.execute(query, params).fetchall()
-        return [cls._row_to_entry(r) for r in rows]
-
-    @classmethod
     def _connect_db(cls, db_path: str):
         import sqlite3
 
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         return conn
-
-    def get_latest_summary(self) -> Optional[WorkingMemorySummaryEntry]:
-        return self.fetch_summary(self.run_id, db_path=self.db_path, agent_id=self.agent_id)

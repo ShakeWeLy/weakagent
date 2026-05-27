@@ -108,6 +108,14 @@ class SessionMemory(BaseMemory):
             self._migrate_schema(conn)
             conn.commit()
 
+    @classmethod
+    def _connect_db(cls, db_path: str):
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
     @staticmethod
     def _migrate_schema(conn) -> None:
         """Upgrade legacy session_memory_summary (run_id UNIQUE) to session_id UNIQUE."""
@@ -143,6 +151,10 @@ class SessionMemory(BaseMemory):
                 "ON session_memory_summary(session_id)"
             )
 
+
+    #--------------------------------------------
+    # Session CRUD
+    #--------------------------------------------
     def ensure_session(self) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -171,32 +183,6 @@ class SessionMemory(BaseMemory):
                 ),
             )
             conn.commit()
-
-    async def generate_title_from_request(
-        self,
-        request: str,
-        *,
-        llm: Optional[LLM] = None,
-    ) -> Optional[str]:
-        text = (request or "").strip()
-        if not text:
-            return self.title
-        if self.reload_messages():
-            return self.title
-
-        llm = llm or LLM(config_name="fast")
-        try:
-            title = await generate_session_title(llm, text)
-        except Exception:
-            logger.exception("LLM session title generation failed")
-            title = ""
-
-        if not title:
-            title = text[:50] + ("..." if len(text) > 50 else "")
-
-        self.title = title.strip()[:200]
-        self.ensure_session()
-        return self.title
 
     @classmethod
     def get_last_session_id(cls, db_path: Optional[str] = None) -> Optional[str]:
@@ -247,6 +233,37 @@ class SessionMemory(BaseMemory):
         self.messages = loaded
         return list(self.messages)
 
+
+    #--------------------------------------------
+    # Session Summary
+    #--------------------------------------------
+    async def generate_title_from_request(
+        self,
+        request: str,
+        *,
+        llm: Optional[LLM] = None,
+    ) -> Optional[str]:
+        text = (request or "").strip()
+        if not text:
+            return self.title
+        if self.reload_messages():
+            return self.title
+
+        llm = llm or LLM(config_name="fast")
+        try:
+            title = await generate_session_title(llm, text)
+        except Exception:
+            logger.exception("LLM session title generation failed")
+            title = ""
+
+        if not title:
+            title = text[:50] + ("..." if len(text) > 50 else "")
+
+        self.title = title.strip()[:200]
+        self.ensure_session()
+        return self.title
+   
+   
     async def summarize(self, *, llm: Optional[LLM] = None) -> Message:
         llm = llm or LLM(config_name="fast")
         msgs = self.messages or self.reload_messages()
@@ -346,85 +363,6 @@ class SessionMemory(BaseMemory):
         )
         return text
 
-    @classmethod
-    def _row_to_summary_entry(cls, row: Any) -> SessionMemorySummaryEntry:
-        try:
-            extra = json.loads(row["extra"] or "{}")
-        except Exception:
-            extra = {}
-        if not isinstance(extra, dict):
-            extra = {}
-        return SessionMemorySummaryEntry(
-            summary_id=str(row["summary_id"]),
-            session_id=str(row["session_id"]),
-            user_id=row["user_id"],
-            agent_type=row["agent_type"],
-            agent_id=row["agent_id"],
-            status=str(row["status"] or "completed"),
-            summary=str(row["summary"] or ""),
-            messages_count=int(row["messages_count"] or 0),
-            extra=extra,
-            created_at=row["created_at"],
-        )
-
-    @classmethod
-    def fetch_summary(
-        cls,
-        session_id: str,
-        *,
-        db_path: Optional[str] = None,
-    ) -> Optional[SessionMemorySummaryEntry]:
-        path = str(cls._resolve_db_path(db_path or "weakagent.sqlite3", MemoryType.SESSION))
-        with cls._connect_db(path) as conn:
-            row = conn.execute(
-                """
-                SELECT summary_id, session_id, user_id, agent_type,
-                       agent_id, status, summary, messages_count, extra, created_at
-                FROM session_memory_summary
-                WHERE session_id = ?
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (session_id,),
-            ).fetchone()
-        return cls._row_to_summary_entry(row) if row else None
-
-    @classmethod
-    def list_summaries(
-        cls,
-        *,
-        db_path: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        limit: int = 20,
-    ) -> List[SessionMemorySummaryEntry]:
-        path = str(cls._resolve_db_path(db_path or "weakagent.sqlite3", MemoryType.SESSION))
-        query = """
-            SELECT summary_id, session_id, user_id, agent_type,
-                   agent_id, status, summary, messages_count, extra, created_at
-            FROM session_memory_summary
-            WHERE 1=1
-        """
-        params: List[Any] = []
-        if agent_id:
-            query += " AND agent_id = ?"
-            params.append(agent_id)
-        query += " ORDER BY created_at DESC, id DESC LIMIT ?"
-        params.append(max(1, int(limit)))
-
-        with cls._connect_db(path) as conn:
-            rows = conn.execute(query, params).fetchall()
-        return [cls._row_to_summary_entry(r) for r in rows]
-
-    @classmethod
-    def _connect_db(cls, db_path: str):
-        import sqlite3
-
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def get_latest_summary(self) -> Optional[SessionMemorySummaryEntry]:
-        return self.fetch_summary(self.session_id, db_path=self.db_path)
 
     def format_for_long_memory_extraction(self) -> str:
         """Serialize session transcript for long-memory LLM extraction."""

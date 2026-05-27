@@ -113,6 +113,44 @@ class LongMemory(BaseMemory):
             created_at=row["created_at"],
         )
 
+
+    #--------------------------------------------
+    # Long Memory Extraction and Saving
+    #--------------------------------------------
+    async def extract_and_save(
+        self,
+        user_message: str,
+        *,
+        llm: Optional[LLM] = None,
+    ) -> dict:
+        """Run LLM extraction and persist when ``should_save`` is true."""
+        llm = llm or LLM(config_name="fast")
+        result = await extract_long_memory(llm, user_message)
+        if result.get("should_save"):
+            self.add_entry(
+                content=result["memory"],
+                memory_type=result.get("memory_type", "general"),
+                importance=result.get("importance", 0.5),
+                source_message=(user_message or "").strip()[:2000] or None,
+            )
+        return result
+
+    async def extract_and_save_from_session(
+        self,
+        session: SessionMemory,
+        *,
+        llm: Optional[LLM] = None,
+    ) -> dict:
+        """Extract long-term memory from a runtime session transcript and persist."""
+        text = session.format_for_long_memory_extraction()
+        if not text or text == "[]":
+            return {"should_save": False}
+        return await self.extract_and_save(text, llm=llm)
+
+
+    #--------------------------------------------
+    # Long Memory CRUD
+    #--------------------------------------------
     def load_for_user(self, user_id: Optional[str] = None) -> List[LongMemoryEntry]:
         """Load all long memories for a user into ``entries``."""
         uid = user_id if user_id is not None else self.user_id
@@ -196,36 +234,6 @@ class LongMemory(BaseMemory):
         )
         self.entries.append(entry)
         return entry
-
-    async def extract_and_save(
-        self,
-        user_message: str,
-        *,
-        llm: Optional[LLM] = None,
-    ) -> dict:
-        """Run LLM extraction and persist when ``should_save`` is true."""
-        llm = llm or LLM(config_name="fast")
-        result = await extract_long_memory(llm, user_message)
-        if result.get("should_save"):
-            self.add_entry(
-                content=result["memory"],
-                memory_type=result.get("memory_type", "general"),
-                importance=result.get("importance", 0.5),
-                source_message=(user_message or "").strip()[:2000] or None,
-            )
-        return result
-
-    async def extract_and_save_from_session(
-        self,
-        session: SessionMemory,
-        *,
-        llm: Optional[LLM] = None,
-    ) -> dict:
-        """Extract long-term memory from a runtime session transcript and persist."""
-        text = session.format_for_long_memory_extraction()
-        if not text or text == "[]":
-            return {"should_save": False}
-        return await self.extract_and_save(text, llm=llm)
 
     def to_system_context(self, *, max_items: int = 20) -> str:
         """Format stored memories for injection into the system prompt."""

@@ -245,12 +245,12 @@ class AgentRuntime(AgentRunMixin):
             _refresh_agent_long_memory(agent, long_mem)
             if result.get("should_save"):
                 logger.info(
-                    "Long memory saved for agent_id=%s type=%s",
+                    "✍️ Saved Long memory for agent_id=%s type=%s",
                     agent_id,
                     result.get("memory_type"),
                 )
             else:
-                logger.info("Long memory extraction skipped for agent_id=%s", agent_id)
+                logger.info("🏃‍♂️ skipped long memory extraction for agent_id=%s", agent_id)
             return result
         except Exception:
             logger.exception(
