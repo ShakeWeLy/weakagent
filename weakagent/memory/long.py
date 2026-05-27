@@ -45,6 +45,11 @@ class LongMemory(BaseMemory):
     entries: List[LongMemoryEntry] = Field(default_factory=list)
     dedupe: bool = Field(default=True, description="Skip insert when content already exists for user_id")
 
+    @property
+    def message(self) -> Message:
+        """Long-term memory message"""
+        return Message.system_message(self.to_system_context())
+
     @model_validator(mode="after")
     def _init(self) -> "LongMemory":
         self.db_path = str(self._resolve_db_path(self.db_path))

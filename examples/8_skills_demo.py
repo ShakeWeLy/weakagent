@@ -33,6 +33,7 @@ class SkillsDemoAgent(ToolCallAgent):
     available_tools: ToolCollection = ToolCollection(ReadFileTool(), Terminate())
     max_steps: int = 5
     skills_enabled: bool = True
+    verbose: bool = True
 
 
 async def inspect_catalog() -> None:
@@ -52,10 +53,6 @@ async def inspect_catalog() -> None:
 
 async def run_agent_turn() -> None:
     agent = SkillsDemoAgent(llm=LLM(config_name="fast"))
-    effective = agent.with_skills_prompt(agent.system_prompt) or ""
-    print("\n=== Effective system prompt (tail) ===")
-    print(effective[-600:] if len(effective) > 600 else effective)
-
     request = "请用 demo-skill 的方式给我打个结构化招呼"
     agent.update_memory("user", request)
     print(f"\n=== User: {request} ===\n")

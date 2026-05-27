@@ -61,13 +61,10 @@ class ToolCallAgent(ReActAgent):
             # Get response with tool options
             response = await self.llm.ask_tool(
                 messages=request_messages,
-                system_msgs=(
-                    [Message.system_message(self.with_skills_prompt(self.system_prompt))]
-                    if self.system_prompt
-                    else None
-                ),
+                system_msgs= self.system_messages,
                 tools=self.available_tools.to_params(),
                 tool_choice=self.tool_choices,
+                verbose=self.verbose
             )
         except ValueError:
             raise

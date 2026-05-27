@@ -38,6 +38,9 @@ class BaseAgent(BaseModel, ABC):
     system_prompt: Optional[str] = Field(
         None, description="System-level instruction prompt"
     )
+    system_messages: List[Message] = Field(
+        default_factory=list, description="System messages for the agent"
+    )
     next_step_prompt: Optional[str] = Field(
         None, description="Prompt for determining next action"
     )
@@ -157,13 +160,24 @@ class BaseAgent(BaseModel, ABC):
                     session_id=self.session_id,
                     )
 
+            if self.system_prompt:
+                self.system_messages.append(Message.system_message(self.system_prompt))
+
+            # add additonal system messages
             if self.use_long_memory:
                 if self.long_memory is None:
                     self.long_memory = LongMemory(user_id=self.user_id)
                 else:
                     self.long_memory.user_id = self.user_id
                 self.long_memory.load_for_user(self.user_id)
-                self.update_memory("system", self.long_memory.to_system_message().content)
+                self.system_messages.append(self.long_memory.message)
+
+            # add skills prompt
+            if self.skills_enabled:
+                mgr = self.get_skill_manager()
+                block = mgr.build_skills_prompt(skill_filter=self.skill_filter)
+                self.system_messages.append(Message.system_message(block))
+
             return self
         except Exception:
             logger.exception("Failed to initialize agent")
@@ -178,20 +192,6 @@ class BaseAgent(BaseModel, ABC):
             mgr = SkillManager()
             object.__setattr__(self, "_skill_manager", mgr)
         return mgr
-
-    def with_skills_prompt(self, base_prompt: Optional[str]) -> Optional[str]:
-        """Append skills usage instructions and `<available_skills>` to a system prompt."""
-        if not base_prompt or not self.skills_enabled:
-            return base_prompt
-
-        mgr = self.get_skill_manager()
-        block = mgr.build_skills_prompt(skill_filter=self.skill_filter)
-        if not block.strip():
-            return base_prompt
-
-        from weakagent.skills.prompt import SKILLS_USAGE_PROMPT
-
-        return f"{base_prompt.rstrip()}\n\n{SKILLS_USAGE_PROMPT.strip()}\n{block}"
 
     def _emit_event(self, event_type: str, data: Optional[dict] = None) -> None:
         """Emit an event to callbacks (sync/async; isolated failures).
