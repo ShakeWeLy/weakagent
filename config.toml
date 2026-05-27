@@ -2,7 +2,7 @@
 [llm]
 model = "deepseek-v4-flash"
 base_url = "https://api.deepseek.com/v1"
-api_key = "sk-e5400ccc286c4eeb874bf1c3c7a78d9a"
+api_key = "sk-bb5dac2e9c6f4124bce5649a9302a274"
 max_tokens = 8192
 temperature = 0.0
 supports_images = true
@@ -13,7 +13,7 @@ enable_think = "default"
 [llm.deepseek.default]
 model = "deepseek-v4-flash"
 base_url = "https://api.deepseek.com/v1"
-api_key = "sk-e5400ccc286c4eeb874bf1c3c7a78d9a"
+api_key = "sk-bb5dac2e9c6f4124bce5649a9302a274"
 max_tokens = 8192
 temperature = 0.0
 supports_images = true
@@ -22,7 +22,7 @@ use_max_completion_tokens = false
 [llm.deepseek.pro]
 model = "deepseek-v4-pro"
 base_url = "https://api.deepseek.com/v1"
-api_key = "sk-e5400ccc286c4eeb874bf1c3c7a78d9a"
+api_key = "sk-bb5dac2e9c6f4124bce5649a9302a274"
 max_tokens = 8192
 temperature = 0.0
 supports_images = true
@@ -32,7 +32,7 @@ use_max_completion_tokens = false
 [llm.kimi.default]
 model = "kimi-k2.5"
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-api_key = "sk-4f519a5d8cba44c48ad3655926cfc753"
+api_key = "sk-bb5dac2e9c6f4124bce5649a9302a274"
 max_tokens = 8192
 temperature = 0.0
 supports_images = true
@@ -48,13 +48,13 @@ use_max_completion_tokens = false
 # temperature = 0.0
 
 [llm.fast]
-model = "qwen-plus"
-base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-api_key = "sk-4f519a5d8cba44c48ad3655926cfc753"
-max_tokens = 4096
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key = "sk-bb5dac2e9c6f4124bce5649a9302a274"
+max_tokens = 8192
 temperature = 0.0
 supports_images = true
-use_max_completion_tokens = true
+use_max_completion_tokens = false
 
 # Optional configuration for specific LLM models
 [llm.vision]
