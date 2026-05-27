@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weakagent"
-version = "0.2.7"
-description = "Introduce mcp to weakagent."
+version = "0.3.0"
+description = "refactor memory module and add system messages management to agent."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
