@@ -6,8 +6,8 @@ from typing import Any, List, Optional, Union, overload
 from pydantic import Field
 
 from weakagent.agent.react import ReActAgent
+from weakagent.agent.llm_errors import handle_llm_think_error
 from weakagent.llm.llm import _extract_reasoning_content
-from weakagent.utils.exceptions import TokenLimitExceeded
 from weakagent.utils.logger import get_logger
 from weakagent.prompt.toolcall import NEXT_STEP_PROMPT, SYSTEM_PROMPT
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolCall, ToolChoice
@@ -70,18 +70,9 @@ class ToolCallAgent(ReActAgent):
         except ValueError:
             raise
         except Exception as e:
-            # Check if this is a RetryError containing TokenLimitExceeded
-            if hasattr(e, "__cause__") and isinstance(e.__cause__, TokenLimitExceeded):
-                token_limit_error = e.__cause__
-                logger.error(
-                    f"🚨 Token limit error (from RetryError): {token_limit_error}"
-                )
-                self.update_memory(
-                    "assistant",
-                    f"Maximum token limit reached, cannot continue execution: {str(token_limit_error)}",
-                )
-                self.state = AgentState.FINISHED
-                return False
+            handled = handle_llm_think_error(self, e)
+            if handled is not None:
+                return handled
             raise
 
         self.tool_calls = tool_calls = (

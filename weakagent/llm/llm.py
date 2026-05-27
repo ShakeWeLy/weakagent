@@ -21,12 +21,7 @@ from openai import (
     RateLimitError,
 )
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_random_exponential,
-)
+from weakagent.llm.retry import LLM_API_RETRY
 
 from weakagent.config.settings import LLMSettings, config
 from .token_counter import TokenCounter
@@ -315,13 +310,7 @@ class LLM:
 
         return formatted_messages
 
-    @retry(
-        wait=wait_random_exponential(min=1, max=60),
-        stop=stop_after_attempt(6),
-        retry=retry_if_exception_type(
-            (OpenAIError, Exception, ValueError)
-        ),  # Don't retry TokenLimitExceeded
-    )
+    @LLM_API_RETRY
     async def ask(
         self,
         messages: List[Union[dict, Message]],
@@ -525,13 +514,7 @@ class LLM:
             )
             raise
 
-    @retry(
-        wait=wait_random_exponential(min=1, max=60),
-        stop=stop_after_attempt(6),
-        retry=retry_if_exception_type(
-            (OpenAIError, Exception, ValueError)
-        ),  # Don't retry TokenLimitExceeded
-    )
+    @LLM_API_RETRY
     async def ask_with_images(
         self,
         messages: List[Union[dict, Message]],
@@ -748,13 +731,7 @@ class LLM:
             logger.error(f"Unexpected error in ask_with_images: {e}")
             raise
 
-    @retry(
-        wait=wait_random_exponential(min=1, max=60),
-        stop=stop_after_attempt(6),
-        retry=retry_if_exception_type(
-            (OpenAIError, Exception, ValueError)
-        ),  # Don't retry TokenLimitExceeded
-    )
+    @LLM_API_RETRY
     async def ask_tool(
         self,
         messages: List[Union[dict, Message]],
@@ -892,13 +869,7 @@ class LLM:
             logger.error(f"Unexpected error in ask_tool: {e}")
             raise
 
-    @retry(
-        wait=wait_random_exponential(min=1, max=60),
-        stop=stop_after_attempt(6),
-        retry=retry_if_exception_type(
-            (OpenAIError, Exception, ValueError)
-        ),  # Don't retry TokenLimitExceeded
-    )
+    @LLM_API_RETRY
     async def ask_tool_stream(
         self,
         messages: List[Union[dict, Message]],

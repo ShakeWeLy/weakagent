@@ -128,6 +128,49 @@ class BaseAgent(BaseModel, ABC):
     )
 
     _system_messages_persisted_session: Optional[str] = PrivateAttr(default=None)
+    _pending_recovery_request: Optional[str] = PrivateAttr(default=None)
+    _last_recovery_fingerprint: Optional[str] = PrivateAttr(default=None)
+    _recovery_attempt_count: int = PrivateAttr(default=0)
+
+    def reset_recovery_budget(self) -> None:
+        """Clear recovery dedupe state (call when the user sends a fresh request)."""
+        self._last_recovery_fingerprint = None
+        self._recovery_attempt_count = 0
+
+    def schedule_recovery_request(self, error_text: str) -> bool:
+        """Queue auto-recovery user message if budget allows.
+
+        Returns:
+            True if a recovery turn was scheduled; False when the same error
+            fingerprint already exhausted MAX_RECOVERY_PER_FINGERPRINT attempts.
+        """
+        from weakagent.utils.run_errors import (
+            MAX_RECOVERY_PER_FINGERPRINT,
+            build_recovery_request,
+            error_fingerprint,
+        )
+
+        fp = error_fingerprint(error_text)
+        if fp != self._last_recovery_fingerprint:
+            self._last_recovery_fingerprint = fp
+            self._recovery_attempt_count = 0
+        self._recovery_attempt_count += 1
+        if self._recovery_attempt_count > MAX_RECOVERY_PER_FINGERPRINT:
+            logger.warning(
+                "Recovery budget exhausted for agent %s (fingerprint=%s, attempts=%s)",
+                self.name,
+                fp,
+                self._recovery_attempt_count - 1,
+            )
+            return False
+        self._pending_recovery_request = build_recovery_request(error_text)
+        return True
+
+    def pop_recovery_request(self) -> Optional[str]:
+        """Return and clear a pending recovery user message, if any."""
+        req = self._pending_recovery_request
+        self._pending_recovery_request = None
+        return req
 
     @model_validator(mode="after")
     def initialize_agent(self) -> "BaseAgent":
@@ -395,6 +438,8 @@ class BaseAgent(BaseModel, ABC):
             self.short_memory.run_id = self.run_id
             self.short_memory.flushed_this_run = False
             self.request = request
+            self.current_step = 0
+            self.state = AgentState.IDLE
             # In-memory once-per-session guard; no DB read on later runs.
             self._persist_system_messages()
         
