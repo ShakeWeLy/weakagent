@@ -26,7 +26,7 @@ class BriefReActAgent(ToolCallAgent):
     name: str = "react"
     description: str = "an agent that git a brieft think, selcet tools to execute tool calls using react."
     available_tools: ToolCollection = ToolCollection(
-        CreateChatCompletion(), Terminate(), AskHumanTool()
+        Terminate(), AskHumanTool()
     )
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
     special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name, AskHumanTool().name])

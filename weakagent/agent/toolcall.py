@@ -13,7 +13,7 @@ from weakagent.prompt.toolcall import NEXT_STEP_PROMPT, SYSTEM_PROMPT
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolCall, ToolChoice
 from weakagent.schemas.agent import AgentState
 from weakagent.schemas.message import Message
-from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate, WebSearch
+from weakagent.tools import ToolCollection, Terminate, WebSearch
 from weakagent.tools.special_tool.ask_human import AskHumanTool
 from weakagent.tools.base import BaseTool
 from weakagent.tools.tool import HotReloadTool, ListToolsTool
@@ -32,7 +32,6 @@ class ToolCallAgent(ReActAgent):
     next_step_prompt: str = NEXT_STEP_PROMPT
 
     available_tools: ToolCollection = ToolCollection(
-        CreateChatCompletion(),
         WebSearch(),
         AskHumanTool(),
         Terminate(),

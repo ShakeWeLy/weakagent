@@ -42,9 +42,8 @@ class CreateSubAgentTool(BaseTool):
                 "type": "array",
                 "items": {"type": "string"},
                 "description": (
-                    "Optional tool names for available_tools injection. "
-                    "Supported: create_chat_completion, terminate, summary, "
-                    "run_sub_agent, create_sub_agent, hot_reload."
+                    "Optional tool names for available_tools injection. Toolcall agent must a terminate tool."
+                    "Supported: terminate, grep, list_files, patch_file, write_file, create_sub_agent, run_sub_agent, hot_reload and so on.(see ListToolsTool)"
                 ),
             },
             "extra_kwargs": {
@@ -138,20 +137,18 @@ class CreateSubAgentTool(BaseTool):
 
     @staticmethod
     def _build_tool_collection(tool_names: List[str]):
-        from weakagent.tools.create_chat_completion import CreateChatCompletion
         from weakagent.tools import Terminate
         from weakagent.tools.tool_collection import ToolCollection
         from weakagent.tools.sub_agent.run_sub_agent import RunSubAgentTool
         from weakagent.tools.tool.hot_reload import HotReloadTool
-        from weakagent.tools.memory.long import SaveLongMemoryTool
+        from weakagent.tools.command import BashTool
 
         builders = {
-            "create_chat_completion": CreateChatCompletion,
             "terminate": Terminate,
             "run_sub_agent": RunSubAgentTool,
             "create_sub_agent": CreateSubAgentTool,
-            "save_long_memory": SaveLongMemoryTool,
             "hot_reload": HotReloadTool,
+            "bash": BashTool,
         }
         unsupported = sorted({n for n in tool_names if n not in builders})
         if unsupported:
