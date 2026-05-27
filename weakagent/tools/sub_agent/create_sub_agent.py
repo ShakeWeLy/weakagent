@@ -44,7 +44,7 @@ class CreateSubAgentTool(BaseTool):
                 "description": (
                     "Optional tool names for available_tools injection. "
                     "Supported: create_chat_completion, terminate, summary, "
-                    "run_sub_agent, create_sub_agent."
+                    "run_sub_agent, create_sub_agent, hot_reload."
                 ),
             },
             "extra_kwargs": {
@@ -142,12 +142,16 @@ class CreateSubAgentTool(BaseTool):
         from weakagent.tools import Terminate
         from weakagent.tools.tool_collection import ToolCollection
         from weakagent.tools.sub_agent.run_sub_agent import RunSubAgentTool
+        from weakagent.tools.tool.hot_reload import HotReloadTool
+        from weakagent.tools.memory.long import SaveLongMemoryTool
 
         builders = {
             "create_chat_completion": CreateChatCompletion,
             "terminate": Terminate,
             "run_sub_agent": RunSubAgentTool,
             "create_sub_agent": CreateSubAgentTool,
+            "save_long_memory": SaveLongMemoryTool,
+            "hot_reload": HotReloadTool,
         }
         unsupported = sorted({n for n in tool_names if n not in builders})
         if unsupported:
