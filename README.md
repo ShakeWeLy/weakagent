@@ -177,10 +177,44 @@ runner.start()
 | **会话** | `ConversationMemory` | 可选；完整消息历史、`session_id`、标题等 | SQLite `conversation_*` 表（`[conversation].db_path`） |
 | **运行时** | `RuntimeMemory` | 每轮 **request + last_result**（不含中间 tool 细节） | SQLite `runtime_session*` 表；`run_loop` 结束可 `finalize_session` 摘要 |
 | **工作** | `WorkingMemory` | 供摘要用的消息列表 | 内存，可 `summarize()` 压缩 |
+| **长期** | `LongMemory` | 持久化的用户事实、偏好、项目、身份等结构化知识 | SQLite `long_term_memory` 表 |
+
+**长期记忆（LongMemory）** 记录用户持久化的知识（身份、偏好、项目、技术栈、目标等），通过 `LongMemory.add_entry()` 写入 SQLite `long_term_memory` 表。写入时支持 `dedupe`（按 `user_id + content` 去重）。Agent 运行时可通过 `LongMemory.to_system_context()` 将记忆格式化为 `[Long-term memory]` 前缀的系统提示注入对话。
+
+```python
+from weakagent.memory.long import LongMemory
+
+mem = LongMemory(user_id="user_001")
+mem.load_for_user("user_001")
+
+# 手动写入
+mem.add_entry(content="喜欢小猫咪", memory_type="preference", importance=0.9)
+
+# LLM 提取写入（从用户消息中自动抽取记忆）
+await mem.extract_and_save("我家养了三只猫", llm=llm)
+
+# 格式化为系统上下文
+print(mem.to_system_context(max_items=20))
+# [Long-term memory]
+# - (preference, 0.90) 喜欢小猫咪
+```
+
+**SaveLongMemoryTool**（`weakagent/tools/memory/long.py`）提供了 Agent 可调用的长期记忆工具。参数：
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `memory` | string | **必填** | 简洁的结构化事实 |
+| `memory_type` | string | `"general"` | 分类：general / preference / project / identity / goal / habit |
+| `importance` | number | `0.75` | 重要性 0.0 ~ 1.0 |
+
+两种使用方式：
+
+- **独立调用**（无 Agent 上下文）：`await tool.execute(memory="...", memory_type="preference", importance=0.9)`
+- **Agent 工具循环**（自动绑定 user_id、source_message）：Agent 在工具调用中直接使用 `save_long_memory(memory="...")`
 
 **清理策略**（`BaseMemory.cleanup_if_needed`）：按轮次保留最近 N 轮、截断过长 tool 输出、超 token 窗口时丢弃旧轮或 LLM 摘要。配置项见 `keep_last_n`、`max_context_turns`、`cleanup_strategy` 等。
 
-数据流简述：`runtime_memory` 在 `run` 开始时加载进 `short_memory`；单轮结束后把 `last_result` 写回 `runtime_memory`；`conversation` 在启用时逐条落库。
+数据流简述：`runtime_memory` 在 `run` 开始时加载进 `short_memory`；单轮结束后把 `last_result` 写回 `runtime_memory`；`conversation` 在启用时逐条落库；`long_memory` 在启用了 `use_long_memory` 的 Agent 中自动注入到 system messages。
 
 ---
 
@@ -233,6 +267,8 @@ country = "cn"
 | `examples/5_scheduler_demo.py` | 定时任务三种用法 |
 | `examples/7_long_memory_demo.py` | 长期记忆提取与 SQLite 持久化 |
 | `examples/8_skills_demo.py` | Skills 目录加载、系统提示注入、`read` 读 SKILL.md |
+| `examples/9_mcp_demo.py` | 连接外部 MCP、列出/直调工具 |
+| `examples/10_mcp_agent_demo.py` | `run_loop` + Skills + MCP 交互演示 |
 | `main.py` | 可运行聊天 Agent（`run_loop`） |
 
 ---
