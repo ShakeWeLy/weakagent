@@ -94,14 +94,27 @@ class ToolCollection:
         arbitrary_types_allowed = True
 
     def __init__(self, *tools: BaseTool):
-        self.tools = tools
-        self.tool_map = {tool.name: tool for tool in tools}
+        valid: list[BaseTool] = []
+        for tool in tools:
+            try:
+                tool.validate_schema()
+                valid.append(tool)
+            except ValueError as exc:
+                logger.error("Skipping invalid tool %r at mount: %s", tool.name, exc)
+        self.tools = tuple(valid)
+        self.tool_map = {tool.name: tool for tool in self.tools}
 
     def __iter__(self):
         return iter(self.tools)
 
     def to_params(self) -> List[Dict[str, Any]]:
-        return [tool.to_params() for tool in self.tools]
+        params: List[Dict[str, Any]] = []
+        for tool in self.tools:
+            try:
+                params.append(tool.to_params())
+            except ValueError as exc:
+                logger.error("Omitting tool %r from LLM request: %s", tool.name, exc)
+        return params
 
     async def execute(
         self, *, name: str, tool_input: Dict[str, Any] = None
@@ -177,6 +190,10 @@ class ToolCollection:
 
         try:
             tool = tool_cls()
+            tool.validate_schema()
+        except ValueError as exc:
+            logger.warning("Failed schema validation for tool %s: %s", key, exc)
+            return None
         except Exception as exc:
             logger.warning("Failed to instantiate tool %s: %s", key, exc)
             return None
@@ -198,6 +215,10 @@ class ToolCollection:
 
         try:
             tool = tool_cls()
+            tool.validate_schema()
+        except ValueError as exc:
+            logger.warning("Failed schema validation for remount %s: %s", key, exc)
+            return None
         except Exception as exc:
             logger.warning("Failed to remount tool %s: %s", key, exc)
             return None
@@ -222,7 +243,17 @@ class ToolCollection:
         -------
         ToolCollection
             Self for chaining. Skips add when name exists and replace is False.
+
+        Raises
+        ------
+        ValueError
+            When the tool parameters schema is invalid for the LLM API.
         """
+        try:
+            tool.validate_schema()
+        except ValueError as exc:
+            raise ValueError(f"Cannot mount tool {tool.name!r}: {exc}") from exc
+
         if tool.name in self.tool_map:
             if replace:
                 self.tools = tuple(

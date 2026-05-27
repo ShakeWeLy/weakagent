@@ -7,6 +7,10 @@ from typing import Any, Dict, Optional, Type
 from pydantic import BaseModel, Field
 
 from weakagent.schemas.message import Message
+from weakagent.tools.schema import normalize_tool_parameters
+from weakagent.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # =========================================================
 # Tool Execution Result
@@ -89,16 +93,23 @@ class BaseTool(ABC):
         """
         raise NotImplementedError
 
+    def normalized_parameters(self) -> dict:
+        """Validate and return parameters schema ready for the LLM API."""
+        return normalize_tool_parameters(self.name, self.parameters)
+
+    def validate_schema(self) -> None:
+        """Raise ValueError when parameters schema cannot be sent to the LLM."""
+        self.normalized_parameters()
+
     def to_params(self) -> dict:
-        """
-        OpenAI tool calling parameters
-        """
+        """OpenAI tool calling parameters (invalid schemas are blocked here)."""
+        schema = self.normalized_parameters()
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters,
+                "parameters": schema,
             },
         }
 
