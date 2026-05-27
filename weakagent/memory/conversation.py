@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from pydantic import Field
 
@@ -116,6 +116,7 @@ class ConversationMemory(BaseMemory):
         run_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         last_n: Optional[int] = None,
+        exclude_roles: Optional[Iterable[str]] = None,
     ) -> List[Message]:
         path = str(cls._resolve_db_path(db_path or "weakagent.sqlite3", MemoryType.CONVERSATION))
         query = """
@@ -139,6 +140,9 @@ class ConversationMemory(BaseMemory):
             rows = conn.execute(query, params).fetchall()
 
         messages = [message_from_storage_row(r) for r in rows]
+        if exclude_roles:
+            excluded = set(exclude_roles)
+            messages = [m for m in messages if m.role not in excluded]
         if last_n is not None:
             messages = select_last_n_messages_with_integrity(messages, last_n)
         return messages

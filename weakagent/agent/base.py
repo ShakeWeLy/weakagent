@@ -7,7 +7,7 @@ import time
 import uuid
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from weakagent.llm import LLM
 from weakagent.utils.logger import get_logger
@@ -127,6 +127,8 @@ class BaseAgent(BaseModel, ABC):
         default=None, description="Optional allow-list of skill names"
     )
 
+    _system_messages_persisted_session: Optional[str] = PrivateAttr(default=None)
+
     @model_validator(mode="after")
     def initialize_agent(self) -> "BaseAgent":
         """Initialize agent with default settings if not provided."""
@@ -241,6 +243,42 @@ class BaseAgent(BaseModel, ABC):
         runtime_cb = getattr(runtime, "on_event", None) if runtime is not None else None
         if runtime_cb is not self.on_event:
             _dispatch(runtime_cb)
+
+    def _persist_system_messages(self) -> None:
+        """Persist agent system_messages to conversation DB once per session.
+
+        Uses an in-memory flag only (no DB read). Same session_id within one agent
+        instance writes at most once; subsequent ``run()`` calls return immediately.
+        """
+        if not self.system_messages or self.conversation is None:
+            return
+
+        session_id = self.session.session_id if self.session is not None else self.session_id
+        if not session_id:
+            return
+        if self._system_messages_persisted_session == session_id:
+            return
+
+        conv = self.conversation
+        conv.session_id = session_id
+        if self.run_id:
+            conv.run_id = self.run_id
+        if self.user_id:
+            conv.user_id = self.user_id
+        if self.session is not None:
+            conv.agent_id = conv.agent_id or self.session.agent_id
+            conv.agent_type = conv.agent_type or self.session.agent_type
+
+        extra = {
+            "agent": self.name,
+            "kind": "system_prompt",
+        }
+        try:
+            for msg in self.system_messages:
+                conv._persist_message(msg, extra=extra)
+            self._system_messages_persisted_session = session_id
+        except Exception:
+            logger.exception("Failed to persist system messages for session_id=%s", session_id)
 
     def append_message(self, message: Message, *, extra: Optional[Dict[str, Any]] = None) -> None:
         """Append to short memory, conversation log, and in-memory session transcript."""
@@ -357,6 +395,8 @@ class BaseAgent(BaseModel, ABC):
             self.short_memory.run_id = self.run_id
             self.short_memory.flushed_this_run = False
             self.request = request
+            # In-memory once-per-session guard; no DB read on later runs.
+            self._persist_system_messages()
         
         # Prune leftover short_memory before a new run (multi-turn runtime loops).
         if self.short_memory.messages:

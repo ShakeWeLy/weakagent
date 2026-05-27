@@ -242,6 +242,7 @@ class SessionMemory(BaseMemory):
             db_path=self.db_path,
             session_id=self.session_id,
             agent_id=self.agent_id,
+            exclude_roles=("system",),
         )
         self.messages = loaded
         return list(self.messages)

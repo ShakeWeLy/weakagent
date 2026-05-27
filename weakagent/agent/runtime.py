@@ -149,12 +149,14 @@ class AgentRuntime(AgentRunMixin):
                     session_id=prior_session_id,
                     agent_id=agent_id,
                     last_n=last_n,
+                    exclude_roles=("system",),
                 )
             else:
                 messages = ConversationMemory.fetch_messages(
                     db_path=sess.db_path,
                     agent_id=agent_id,
                     last_n=last_n,
+                    exclude_roles=("system",),
                 )
             if not messages:
                 return
