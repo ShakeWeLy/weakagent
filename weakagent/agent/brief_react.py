@@ -10,7 +10,7 @@ from weakagent.llm.llm import _extract_reasoning_content
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolCall, ToolChoice
 from weakagent.schemas.agent import AgentState
 from weakagent.schemas.message import ROLE_TYPE, Message, Role
-from weakagent.tools import ToolCollection, CreateChatCompletion, Terminate, AskHumanTool
+from weakagent.tools import ToolCollection, Terminate, AskHumanTool
 
 
 class BriefMessageProccess(str, Enum):
