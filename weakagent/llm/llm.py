@@ -63,6 +63,14 @@ class LLM:
         config_name: str = "default",
         llm_config: Optional[LLMSettings] = None,
         *,
+        model: str|None = None,
+        max_tokens: int|None = None,
+        temperature: float|None = None,
+        api_key: str|None = None,
+        base_url: str|None = None,
+        supports_images: bool|None = None,
+        use_max_completion_tokens: bool|None = None,
+        enable_think: str|None = None,
         on_event: Optional[EventCallback] = None,
     ):
         llm_config = llm_config or config.llm
@@ -88,6 +96,24 @@ class LLM:
             if hasattr(llm_config, "max_input_tokens")
             else None
         )
+
+        # reset
+        if model:
+            self.model = model
+        if max_tokens:
+            self.max_tokens = max_tokens
+        if temperature:
+            self.temperature = temperature
+        if api_key:
+            self.api_key = api_key
+        if base_url:
+            self.base_url = base_url
+        if supports_images:
+            self.supports_images = supports_images
+        if use_max_completion_tokens:
+            self.use_max_completion_tokens = use_max_completion_tokens
+        if enable_think:
+            self.enable_think = enable_think
 
         # Initialize tokenizer
         try:

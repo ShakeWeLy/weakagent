@@ -54,7 +54,7 @@ from weakagent.scheduler.executors import DailySummaryExecutor, WeeklyReportExec
 from weakagent.schemas.tool import TOOL_CHOICE_TYPE, ToolChoice
 from weakagent.skills.manager import SkillManager
 from weakagent.tools import ToolCollection, Terminate
-from weakagent.tools.tool import HotReloadTool
+from weakagent.tools.tool import HotReloadTool, ListToolsTool
 from weakagent.tools.scheduler import (
     CreateTaskTool,
     DeleteTaskTool,
@@ -114,12 +114,12 @@ class FullDemoAgent(ToolCallAgent):
     system_prompt: str = COMBINED_SYSTEM_PROMPT
     available_tools: ToolCollection = ToolCollection(
         Terminate(),
-        ReadFileTool(),
         AskHumanTool(),
         AgentResearchTool(),
         CreateSubAgentTool(),
         RunSubAgentTool(),
         GrepTool(),
+        ReadFileTool(),
         ListFilesTool(),
         PatchFileTool(),
         WriteFileTool(),
@@ -128,6 +128,7 @@ class FullDemoAgent(ToolCallAgent):
         GetTaskTool(),
         UpdateTaskTool(),
         DeleteTaskTool(),
+        ListToolsTool(),
         HotReloadTool(),
     )
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
@@ -136,8 +137,9 @@ class FullDemoAgent(ToolCallAgent):
     )
     skills_enabled: bool = True
     max_steps: int = 100
-    verbose: bool = True
+    verbose: bool = False
     only_last_result: bool = True
+    summarize_working_memory: bool = True
 
 
 def _print_skills_catalog() -> None:

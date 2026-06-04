@@ -47,6 +47,23 @@ class BaseAgent(BaseModel, ABC):
 
     # Dependencies
     llm: LLM = Field(default_factory=LLM, description="Language model instance")
+
+    # Execution control
+    max_steps: int = Field(default=10, description="Maximum steps before termination")
+    current_step: int = Field(default=0, description="Current step in execution")
+    duplicate_threshold: int = 2
+    on_event: Optional[EventCallback] = Field(
+        default=None, description="Optional event callback for agent lifecycle events"
+    )
+    state: AgentState = Field(
+        default=AgentState.IDLE, description="Current agent state"
+    )
+    awaiting_human: bool = Field(
+        default=False,
+        description="If true, this run is paused awaiting user input; do not persist last_result.",
+    )
+
+    # Memory
     working_memory: WorkingMemory = Field(
         default_factory=WorkingMemory, description="Per-run agent working context"
     )
@@ -65,28 +82,16 @@ class BaseAgent(BaseModel, ABC):
         default=None,
         description="Long-term memory message for prompt injection",
     )
-    long_memory_message: Optional[Message] = Field(
-        default=None,
-        description="Long-term memory message for prompt injection",
-    )
+
+    # IDs
     user_id: Optional[str] = Field(
         default=None,
         description="User id for the agent",
     )
-    awaiting_human: bool = Field(
-        default=False,
-        description="If true, this run is paused awaiting user input; do not persist last_result.",
-    )
-    # Single-run-level 
     run_id: Optional[str] = Field(
         default_factory=lambda: uuid.uuid4().hex[:12],
         description="Run id for the agent",
     )
-    state: AgentState = Field(
-        default=AgentState.IDLE, description="Current agent state"
-    )
-
-    # session-level persistence helpers (last_request/last_result for each agent.run).
     session_id: Optional[str] = Field(
         default_factory=lambda: uuid.uuid4().hex[:12],
         description="Session id for the agent",
@@ -95,24 +100,12 @@ class BaseAgent(BaseModel, ABC):
         default_factory=lambda: uuid.uuid4().hex[:12],
         description="Agent id for the agent",
     )
+
+    # Request and Response
     request: Optional[str] = Field(default=None, description="Current request from user")
     last_request: Optional[str] = Field(default=None)
     last_result: Optional[str] = Field(default=None)
 
-    on_event: Optional[EventCallback] = Field(
-        default=None, description="Optional event callback for agent lifecycle events"
-    )
-
-    # Execution control
-    max_steps: int = Field(default=10, description="Maximum steps before termination")
-    current_step: int = Field(default=0, description="Current step in execution")
-    duplicate_threshold: int = 2
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        extra="allow",
-    )
-    
     # Optional
     only_last_result: bool = Field(default="", description="If only return last output result from agent")
     summarize_short_memory: bool = Field(default=False, description="If return the summarize of the short memory")

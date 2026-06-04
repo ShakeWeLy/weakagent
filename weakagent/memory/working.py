@@ -94,14 +94,20 @@ class WorkingMemory(BaseMemory):
         extra: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Summarize current messages and persist to `working_memory_summary`."""
+        owns_llm = llm is None
         llm = llm or LLM(config_name="fast")
-        summary_msg = await self.summarize(llm=llm)
-        return self.save_summary(
-            summary_msg.content or "",
-            run_id=run_id,
-            llm=llm,
-            extra=extra,
-        )
+        try:
+            summary_msg = await self.summarize(llm=llm)
+            return self.save_summary(
+                summary_msg.content or "",
+                run_id=run_id,
+                llm=llm,
+                extra=extra,
+            )
+        finally:
+            # Close httpx before asyncio.run() tears down the loop (background thread).
+            if owns_llm:
+                await llm.client.close()
 
     def summarize_and_save_sync(
         self,
