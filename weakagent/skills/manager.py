@@ -6,12 +6,7 @@ import json
 import os
 from typing import Dict, List, Optional
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib  # type: ignore[no-redef]
-
-from weakagent.config.settings import PROJECT_ROOT
+from weakagent.config.settings import PROJECT_ROOT, config
 from weakagent.utils.logger import get_logger
 from weakagent.skills.types import SkillEntry, SkillSnapshot
 from weakagent.skills.loader import SkillLoader
@@ -23,16 +18,8 @@ SKILLS_CONFIG_FILE = "skills_config.json"
 
 
 def load_skills_settings() -> dict:
-    """Load optional [skills] section from config.toml."""
-    cfg_path = PROJECT_ROOT / "config.toml"
-    if not cfg_path.exists():
-        return {}
-    try:
-        raw = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    section = raw.get("skills") or {}
-    return section if isinstance(section, dict) else {}
+    """Load [skills] from global config singleton."""
+    return config.skills.model_dump(exclude_none=True)
 
 
 class SkillManager:

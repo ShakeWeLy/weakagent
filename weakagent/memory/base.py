@@ -7,12 +7,7 @@ from typing import List
 
 from pydantic import BaseModel, Field, model_validator
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib  # type: ignore[no-redef]
-
-from weakagent.config.settings import PROJECT_ROOT
+from weakagent.config.settings import config
 from weakagent.schemas.message import Message
 from weakagent.schemas.tool import ToolCall
 from weakagent.utils.logger import get_logger
@@ -91,19 +86,10 @@ class BaseMemory(BaseModel, ABC):
 
     @staticmethod
     def _resolve_db_path(db_path: str, memory_type: MemoryType) -> Path:
-        p = Path(db_path)
-        if p.is_absolute():
-            return p
-        cfg_path = PROJECT_ROOT / "config.toml"
-        try:
-            raw = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
-        except Exception:
-            raw = {}
-        configured = (raw.get(memory_type.value) or {}).get("db_path")
-        if configured:
-            cp = Path(str(configured))
-            return cp if cp.is_absolute() else (PROJECT_ROOT / cp)
-        return PROJECT_ROOT / p
+        return config.resolve_db_path(
+            db_path,
+            sections=(memory_type.value, "conversation", "memory"),
+        )
     
     def _init_db(self) -> None:
         """Override in subclasses that own sqlite tables."""

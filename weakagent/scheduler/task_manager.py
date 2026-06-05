@@ -12,12 +12,7 @@ from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel, Field
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib  # type: ignore[no-redef]
-
-from weakagent.config.settings import PROJECT_ROOT
+from weakagent.config.settings import config
 from weakagent.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -134,20 +129,10 @@ class TaskStore:
     def _resolve_db_path(db_path: str | Path | None) -> Path:
         if db_path is not None:
             return Path(db_path)
-
-        cfg_path = PROJECT_ROOT / "config.toml"
-        try:
-            raw = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
-        except Exception:
-            logger.exception("Failed to load config.toml")
-            raw = {}
-
-        configured = (raw.get("scheduler") or {}).get("db_path")
-        if configured:
-            p = Path(str(configured))
-            return p if p.is_absolute() else (PROJECT_ROOT / p)
-
-        return PROJECT_ROOT / "tasks.sqlite3"
+        return config.resolve_db_path(
+            config.scheduler.db_path,
+            sections=("scheduler",),
+        )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)

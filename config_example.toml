@@ -7,8 +7,44 @@ max_tokens = 8192
 temperature = 0.0
 supports_images = true
 use_max_completion_tokens = false
-# Thinking mode (DeepSeek/OpenAI-compat): "default" | "enabled" | "disabled"; or true/false
 enable_think = "default"
+
+[llm.fast]
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key = "sk-"
+max_tokens = 8192
+temperature = 0.0
+supports_images = true
+use_max_completion_tokens = false
+
+[llm.deepseek_default]
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com/v1"
+api_key = "sk-"
+max_tokens = 8192
+temperature = 0.0
+supports_images = true
+use_max_completion_tokens = false
+
+[llm.deepseek_pro]
+model = "deepseek-v4-pro"
+base_url = "https://api.deepseek.com/v1"
+api_key = "sk-"
+max_tokens = 8192
+temperature = 0.0
+supports_images = true
+use_max_completion_tokens = false
+
+# kimi
+[llm.kimi_default]
+model = "kimi-k2.5"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key = "sk-"
+max_tokens = 8192
+temperature = 0.0
+supports_images = true
+use_max_completion_tokens = false
 
 
 # [llm] #OLLAMA:
@@ -19,6 +55,12 @@ enable_think = "default"
 # max_tokens = 4096
 # temperature = 0.0
 
+# Optional configuration for specific LLM models
+[llm.vision]
+model = "mimo-v2.5"       # The vision model to use
+base_url = "sk-62d1a7a5d5224973b4d0130fd3390ece" # API endpoint URL for vision model
+api_key = "sk-"  # Your API key for vision model
+max_tokens = 8192                          # Maximum number of tokens in the response
 
 [scheduler]
 # SQLite path for TaskStore. Relative paths are resolved from project root (config.toml directory).
@@ -28,9 +70,11 @@ db_path = "weakagent.sqlite3"
 # SQLite path for persisted agent conversation tables.
 db_path = "weakagent.sqlite3"
 
-[runtime_session]
-# SQLite path for runtime session tables (request + last_result history).
-db_path = "weakagent.sqlite3"
+[skills]
+# builtin: project root skills/ ; custom: workspace/skills/ (skills_config.json)
+builtin_dir = "skills"
+custom_dir = "workspace/skills"
+# exclude = ["knowledge-wiki"]
 
 # Web search (web_search tool). Optional; defaults are sensible for DuckDuckGo-first.
 [search]
@@ -48,23 +92,18 @@ lang = "zh"
 # Country code for search results. Options: "us" (United States), "cn" (China), etc.
 country = "cn"
 
-# External MCP servers (Streamable HTTP / SSE / stdio)
+
+# External MCP (e.g. Record App Streamable HTTP on :3001)
 [mcp]
-enabled = false
+enabled = true
 transport = "streamable_http"
 server_url = "http://localhost:3001/mcp"
 server_id = "record-app"
-sync_key = "YOUR_SYNC_KEY"
+sync_key = "b6b1a2fef37f7e89ffb60dfb"   # also sent as X-Sync-Key; use your real 8+ char key
 
-# Or multiple servers:
+# Multi-server example (comment flat keys above and use this instead):
 # [[mcp.servers]]
 # id = "record-app"
 # transport = "streamable_http"
 # url = "http://localhost:3001/mcp"
-# sync_key = "YOUR_SYNC_KEY"
-#
-# [[mcp.servers]]
-# id = "local-stdio"
-# transport = "stdio"
-# command = "npx"
-# args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+# sync_key = "your-sync-key"

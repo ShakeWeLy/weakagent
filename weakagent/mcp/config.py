@@ -6,12 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib  # type: ignore[no-redef]
-
-from weakagent.config.settings import PROJECT_ROOT
+from weakagent.config.settings import config
 
 
 @dataclass
@@ -52,14 +47,7 @@ class MCPSettings:
     servers: List[MCPServerSpec] = field(default_factory=list)
 
 
-def load_mcp_settings(config_path: Optional[str] = None) -> MCPSettings:
-    """Parse [mcp] and [[mcp.servers]] from config.toml."""
-    path = PROJECT_ROOT / "config.toml" if config_path is None else PROJECT_ROOT / config_path
-    if not path.exists():
-        return MCPSettings()
-
-    raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    section = raw.get("mcp") or {}
+def _mcp_settings_from_section(section: Dict[str, Any]) -> MCPSettings:
     if not isinstance(section, dict):
         return MCPSettings()
 
@@ -70,7 +58,6 @@ def load_mcp_settings(config_path: Optional[str] = None) -> MCPSettings:
             continue
         servers.append(_spec_from_dict(item))
 
-    # Flat single-server shorthand when [[mcp.servers]] is not used
     if not servers and (section.get("server_url") or section.get("url")):
         servers.append(
             MCPServerSpec(
@@ -85,8 +72,24 @@ def load_mcp_settings(config_path: Optional[str] = None) -> MCPSettings:
 
     has_servers = bool(servers)
     enabled = bool(section.get("enabled", False)) or has_servers
-
     return MCPSettings(enabled=enabled, servers=[s for s in servers if s.enabled])
+
+
+def load_mcp_settings(config_path: Optional[str] = None) -> MCPSettings:
+    """Parse [mcp] from global config, or an alternate TOML path when given."""
+    if config_path is None:
+        return _mcp_settings_from_section(config.mcp_raw)
+
+    path = config.resolve_path(config_path)
+    if not path.exists():
+        return MCPSettings()
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib  # type: ignore[no-redef]
+    raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    section = raw.get("mcp") or {}
+    return _mcp_settings_from_section(section)
 
 
 def _spec_from_dict(data: Dict[str, Any]) -> MCPServerSpec:

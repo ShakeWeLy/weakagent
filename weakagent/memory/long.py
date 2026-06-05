@@ -8,12 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib  # type: ignore[no-redef]
-
-from weakagent.config.settings import PROJECT_ROOT
+from weakagent.config.settings import config
 from weakagent.llm.llm import LLM
 from weakagent.llm.summarize import extract_long_memory
 from weakagent.memory.base import BaseMemory, MemoryType
@@ -64,20 +59,10 @@ class LongMemory(BaseMemory):
 
     @staticmethod
     def _resolve_db_path(db_path: str) -> Path:
-        p = Path(db_path)
-        if p.is_absolute():
-            return p
-        cfg_path = PROJECT_ROOT / "config.toml"
-        try:
-            raw = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
-        except Exception:
-            raw = {}
-        for section in ("memory", "conversation", "session", "scheduler"):
-            configured = (raw.get(section) or {}).get("db_path")
-            if configured:
-                cp = Path(str(configured))
-                return cp if cp.is_absolute() else (PROJECT_ROOT / cp)
-        return PROJECT_ROOT / p
+        return config.resolve_db_path(
+            db_path,
+            sections=("memory", "conversation", "session", "scheduler"),
+        )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
