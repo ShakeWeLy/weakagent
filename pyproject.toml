@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weakagent"
-version = "0.3.0"
-description = "refactor memory module and add system messages management to agent."
+version = "0.3.2"
+description = "fix issues and add tomli dependency."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 dependencies = [
+    "tomli>=2.0.1; python_version < '3.11'",
     "openai>=2.32.0",
     "pillow>=12.2.0",
     "pydantic>=2.13.3",

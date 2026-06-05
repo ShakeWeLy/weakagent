@@ -1,11 +1,13 @@
 import threading
-import tomllib
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
 def _resolve_config_toml() -> Path:
     """定位 `config.toml`：优先当前工作目录，其次与 `weakagent` 包并列的仓库根（开发布局）。"""
     here = Path(__file__).resolve()

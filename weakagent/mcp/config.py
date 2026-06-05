@@ -1,11 +1,15 @@
 """Load MCP server definitions from config.toml."""
 
 from __future__ import annotations
-
-import tomllib
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from weakagent.config.settings import PROJECT_ROOT
 

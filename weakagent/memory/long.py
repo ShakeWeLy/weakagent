@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import sqlite3
-import tomllib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from weakagent.config.settings import PROJECT_ROOT
 from weakagent.llm.llm import LLM

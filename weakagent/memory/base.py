@@ -1,11 +1,16 @@
 import sqlite3
-import tomllib
 from abc import ABC
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import List
+
 from pydantic import BaseModel, Field, model_validator
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from weakagent.config.settings import PROJECT_ROOT
 from weakagent.schemas.message import Message

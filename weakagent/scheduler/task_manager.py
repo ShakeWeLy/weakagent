@@ -3,16 +3,19 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-import time
-import tomllib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel, Field
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from weakagent.config.settings import PROJECT_ROOT
 from weakagent.utils.logger import get_logger

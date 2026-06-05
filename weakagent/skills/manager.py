@@ -4,8 +4,12 @@ Skill manager for managing skill lifecycle and operations.
 
 import json
 import os
-import tomllib
 from typing import Dict, List, Optional
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
 
 from weakagent.config.settings import PROJECT_ROOT
 from weakagent.utils.logger import get_logger
