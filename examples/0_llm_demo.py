@@ -5,7 +5,7 @@ from weakagent.memory import Message
 llm = LLM(
     model="deepseek-v4-flash",
     base_url="https://api.deepseek.com/v1",
-    api_key="sk-de9115a847bd412990d30fe676fed08f",
+    api_key="sk-",
     max_tokens=8192,
     temperature=0.0,
     supports_images=True,
@@ -13,7 +13,7 @@ llm = LLM(
     enable_think="default",
 )
 
-messages = [Message.user_message("Hello, how are you?")]
+messages = [Message.user_message("Hello, which model are you using?")]
 
 content = asyncio.run(llm.ask(messages))
 print(content)
