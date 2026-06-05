@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from weakagent.schemas.message import Message
+from weakagent.memory.message import Message
 
 
 def to_extra_dict(obj: Any) -> Dict[str, Any]:

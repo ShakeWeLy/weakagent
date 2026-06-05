@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from weakagent.llm.summarize import summarize_short_memory
 from weakagent.memory.base import BaseMemory, MemoryType
-from weakagent.schemas.message import Message
+from weakagent.memory.message import Message
 from weakagent.utils.logger import get_logger
 
 logger = get_logger(__name__)

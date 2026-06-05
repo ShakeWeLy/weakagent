@@ -8,7 +8,7 @@ from typing import List
 from pydantic import BaseModel, Field, model_validator
 
 from weakagent.config.settings import config
-from weakagent.schemas.message import Message
+from weakagent.memory.message import Message
 from weakagent.schemas.tool import ToolCall
 from weakagent.utils.logger import get_logger
 

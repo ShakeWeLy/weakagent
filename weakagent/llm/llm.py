@@ -10,7 +10,7 @@ import inspect
 import json
 import time
 import uuid
-from typing import Any, Awaitable, Callable, List, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
 import tiktoken
 from openai import (
@@ -73,8 +73,18 @@ class LLM:
         enable_think: str|None = None,
         on_event: Optional[EventCallback] = None,
     ):
-        llm_config = llm_config or config.llm
-        llm_config = llm_config.get(config_name, llm_config["default"])
+        llm_config = self._resolve_llm_settings(
+            config_name=config_name,
+            llm_config=llm_config,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            api_key=api_key,
+            base_url=base_url,
+            supports_images=supports_images,
+            use_max_completion_tokens=use_max_completion_tokens,
+            enable_think=enable_think,
+        )
         self.model = llm_config.model
         self.max_tokens = llm_config.max_tokens
         self.temperature = llm_config.temperature
@@ -97,24 +107,6 @@ class LLM:
             else None
         )
 
-        # reset
-        if model:
-            self.model = model
-        if max_tokens:
-            self.max_tokens = max_tokens
-        if temperature:
-            self.temperature = temperature
-        if api_key:
-            self.api_key = api_key
-        if base_url:
-            self.base_url = base_url
-        if supports_images:
-            self.supports_images = supports_images
-        if use_max_completion_tokens:
-            self.use_max_completion_tokens = use_max_completion_tokens
-        if enable_think:
-            self.enable_think = enable_think
-
         # Initialize tokenizer
         try:
             self.tokenizer = tiktoken.encoding_for_model(self.model)
@@ -128,6 +120,74 @@ class LLM:
         self.on_event = on_event
         # Set by ask / ask_tool / ask_tool_stream when the provider returns thinking content.
         self._last_reasoning_content: Optional[str] = None
+
+    @staticmethod
+    def _resolve_llm_settings(
+        *,
+        config_name: str,
+        llm_config: Optional[Union[LLMSettings, Dict[str, LLMSettings]]],
+        model: str | None,
+        max_tokens: int | None,
+        temperature: float | None,
+        api_key: str | None,
+        base_url: str | None,
+        supports_images: bool | None,
+        use_max_completion_tokens: bool | None,
+        enable_think: str | None,
+    ) -> LLMSettings:
+        """config.toml 可选；无文件时用构造参数或 llm_config 构建。"""
+        overrides: Dict[str, Any] = {}
+        if model is not None:
+            overrides["model"] = model
+        if max_tokens is not None:
+            overrides["max_tokens"] = max_tokens
+        if temperature is not None:
+            overrides["temperature"] = temperature
+        if api_key is not None:
+            overrides["api_key"] = api_key
+        if base_url is not None:
+            overrides["base_url"] = base_url
+        if supports_images is not None:
+            overrides["supports_images"] = supports_images
+        if use_max_completion_tokens is not None:
+            overrides["use_max_completion_tokens"] = use_max_completion_tokens
+        if enable_think is not None:
+            overrides["enable_think"] = enable_think
+
+        if isinstance(llm_config, LLMSettings):
+            base = llm_config
+        else:
+            profiles: Dict[str, LLMSettings] = llm_config or config.llm
+            if profiles:
+                if config_name in profiles:
+                    base = profiles[config_name]
+                elif "default" in profiles:
+                    base = profiles["default"]
+                else:
+                    base = next(iter(profiles.values()))
+            elif overrides.get("model") and overrides.get("base_url") and overrides.get("api_key"):
+                base = LLMSettings(
+                    model=overrides["model"],
+                    base_url=overrides["base_url"],
+                    api_key=overrides["api_key"],
+                    max_tokens=overrides.get("max_tokens", 4096),
+                    temperature=overrides.get("temperature", 1.0),
+                    supports_images=overrides.get("supports_images", False),
+                    use_max_completion_tokens=overrides.get(
+                        "use_max_completion_tokens", False
+                    ),
+                    enable_think=overrides.get("enable_think", "default"),
+                )
+                return base
+            else:
+                raise ValueError(
+                    "未找到 config.toml 中的 [llm] 配置，且未提供完整的 LLM 参数。"
+                    "请放置 config.toml，或在 LLM(...) 中传入 model、base_url、api_key。"
+                )
+
+        if not overrides:
+            return base
+        return base.model_copy(update=overrides)
 
     @property
     def last_reasoning_content(self) -> Optional[str]:

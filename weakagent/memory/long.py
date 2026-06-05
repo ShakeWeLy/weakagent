@@ -13,7 +13,7 @@ from weakagent.llm.llm import LLM
 from weakagent.llm.summarize import extract_long_memory
 from weakagent.memory.base import BaseMemory, MemoryType
 from weakagent.memory.session import SessionMemory
-from weakagent.schemas.message import Message
+from weakagent.memory.message import Message
 from weakagent.utils.logger import get_logger
 
 logger = get_logger(__name__)

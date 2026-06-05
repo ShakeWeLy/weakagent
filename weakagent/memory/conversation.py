@@ -12,7 +12,7 @@ from weakagent.memory.message_store import (
     select_last_n_messages_with_integrity,
     to_extra_dict,
 )
-from weakagent.schemas.message import Message
+from weakagent.memory.message import Message
 from weakagent.utils.logger import get_logger
 
 logger = get_logger(__name__)
